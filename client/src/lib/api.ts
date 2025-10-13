@@ -34,3 +34,37 @@ export const getCompanySafe = async (id: string) => {
   const response = await axios.get(`${API_BASE}/companies/${id}/safe`);
   return response.data;
 };
+
+export const updateCompanyOwners = async (
+  safeAddress: string,
+  owners: string[]
+): Promise<Company> => {
+  const response = await axios.put(
+    `${API_BASE}/companies/${safeAddress}/owners`,
+    { owners }
+  );
+  return response.data;
+};
+
+export const updateCompanyThreshold = async (
+  safeAddress: string,
+  threshold: number
+): Promise<Company> => {
+  const response = await axios.put(
+    `${API_BASE}/companies/${safeAddress}/threshold`,
+    { threshold }
+  );
+  return response.data;
+};
+
+export const syncCompanyData = async (
+  safeAddress: string,
+  owners: string[],
+  threshold: number
+): Promise<Company> => {
+  const response = await axios.put(
+    `${API_BASE}/companies/${safeAddress}/sync`,
+    { owners, threshold }
+  );
+  return response.data;
+};

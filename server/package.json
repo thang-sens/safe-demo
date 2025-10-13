@@ -6,6 +6,7 @@
   "scripts": {
     "start": "node --loader ts-node/esm app.ts",
     "dev": "node --loader ts-node/esm --watch app.ts",
+    "sync": "node --loader ts-node/esm scripts/syncCompanies.ts",
     "test": "echo \"Error: no test specified\" && exit 1"
   },
   "keywords": [],

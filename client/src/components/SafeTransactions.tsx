@@ -12,6 +12,7 @@ import {
 } from "../lib/safeFlow";
 import type { TransactionData, SafeTransaction } from "../lib/safeFlow";
 import { getSafeInfo, getChainId } from "../lib/safe";
+import { syncCompanyData } from "../lib/api";
 
 interface SafeTransactionsProps {
   safeAddress: string;
@@ -48,6 +49,19 @@ export default function SafeTransactions({
   const [newOwner, setNewOwner] = useState("");
   const [ownerToRemove, setOwnerToRemove] = useState("");
   const [newThreshold, setNewThreshold] = useState(1);
+
+  // Helper function to sync backend after owner/threshold changes
+  const syncBackendData = async () => {
+    try {
+      if (safeInfo) {
+        await syncCompanyData(safeAddress, safeInfo.owners, safeInfo.threshold);
+        console.log("Backend synced successfully");
+      }
+    } catch (error) {
+      console.error("Error syncing backend:", error);
+      // Don't throw error - this is non-critical
+    }
+  };
 
   // Load Safe data
   const loadSafeData = async () => {
@@ -138,7 +152,15 @@ export default function SafeTransactions({
         provider
       );
       alert(`Transaction executed successfully!\nTX Hash: ${txHash}`);
+      
+      // Reload Safe data to get updated owners/threshold
       await loadSafeData();
+      
+      // Sync backend with updated data
+      // Wait a bit for blockchain state to be fully updated
+      setTimeout(async () => {
+        await syncBackendData();
+      }, 2000);
     } catch (err) {
       const errorMessage =
         err instanceof Error ? err.message : "Failed to execute transaction";
