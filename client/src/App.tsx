@@ -17,41 +17,26 @@ function App() {
       ) : (
         <div>
           {/* Navigation */}
-          <div
-            style={{
-              marginBottom: "20px",
-              borderBottom: "2px solid #ddd",
-              paddingBottom: "10px",
-            }}
-          >
+          <nav className="navigation">
             <button
               onClick={() => setView("create")}
-              style={{
-                padding: "10px 20px",
-                marginRight: "10px",
-                background: view === "create" ? "#4CAF50" : "#ddd",
-                color: view === "create" ? "white" : "black",
-                border: "none",
-                borderRadius: "4px",
-                cursor: "pointer",
-              }}
+              className={view === "create" ? "nav-button active" : "nav-button"}
             >
+              <svg width="20" height="20" viewBox="0 0 20 20" fill="none" style={{ marginRight: '8px' }}>
+                <path d="M10 4V16M4 10H16" stroke="currentColor" strokeWidth="2" strokeLinecap="round"/>
+              </svg>
               Create Company
             </button>
             <button
               onClick={() => setView("dashboard")}
-              style={{
-                padding: "10px 20px",
-                background: view === "dashboard" ? "#4CAF50" : "#ddd",
-                color: view === "dashboard" ? "white" : "black",
-                border: "none",
-                borderRadius: "4px",
-                cursor: "pointer",
-              }}
+              className={view === "dashboard" ? "nav-button active" : "nav-button"}
             >
+              <svg width="20" height="20" viewBox="0 0 20 20" fill="none" style={{ marginRight: '8px' }}>
+                <path d="M3 4H17M3 10H17M3 16H17" stroke="currentColor" strokeWidth="2" strokeLinecap="round"/>
+              </svg>
               Company Dashboard
             </button>
-          </div>
+          </nav>
 
           {/* Content */}
           {view === "create" ? (
