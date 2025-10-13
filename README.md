@@ -19,13 +19,18 @@ Members authenticate via Web3Auth to sign transactions through Safe SDK (Protoco
 
 ## 🚀 Features
 
-- Company registration and Safe creation
-- Store company ↔ Safe address ↔ owners ↔ threshold in MongoDB
-- Social/passwordless login via Web3Auth
-- Multisig transaction flow:
+- ✅ Company registration and Safe creation
+- ✅ Store company ↔ Safe address ↔ owners ↔ threshold in MongoDB
+- ✅ Social/passwordless login via Web3Auth
+- ✅ **Complete multisig transaction flow** (NEW):
   - Propose → Confirm → Execute
-- Uses Safe Transaction Service API for off-chain signatures
-- Fully written in TypeScript (Node + React)
+  - Pending transactions management
+  - Transaction history
+  - Owner management (add/remove)
+  - Threshold management
+- ✅ Uses Safe Transaction Service API for off-chain signatures
+- ✅ Fully written in TypeScript (Node + React)
+- ✅ **Full Safe Global SDK integration** with all features
 
 ---
 
@@ -107,7 +112,7 @@ VITE_SAFE_TX_SERVICE_URL=https://safe-transaction-sepolia.safe.global
 VITE_API_URL=http://localhost:3000/api
 ```
 
-🏗️ Project Structure
+## 🏗️ Project Structure
 
 ```bash
 /server
@@ -122,28 +127,116 @@ VITE_API_URL=http://localhost:3000/api
   │   ├── App.tsx
   │   ├── components/
   │   │   ├── Login.tsx
-  │   │   └── CompanyDashboard.tsx
+  │   │   ├── CompanyDashboard.tsx
+  │   │   ├── CreateCompany.tsx
+  │   │   └── SafeTransactions.tsx (NEW - Complete UI)
   │   └── lib/
   │       ├── web3auth.ts
   │       ├── safe.ts
-  │       ├── safeFlow.ts
+  │       ├── safeFlow.ts (NEW - Complete implementation)
   │       └── api.ts
-
+/docs
+  ├── SAFE_FLOW_DOCUMENTATION.md (NEW - API docs)
+  ├── SAFE_FLOW_README.md (NEW - Quick start)
+  └── IMPLEMENTATION_SUMMARY.md (NEW - Overview)
 ```
 
-🔧 Running Locally
+## 📖 Safe Flow Documentation
 
-1. Backend
-   cd server
-   npm install
-   npm run dev
+The project now includes a **complete implementation** of Safe Global transaction flow with **all issues fixed** and updated to the latest SDK versions (Protocol Kit v6, API Kit v4).
 
-2. Frontend
-   cd client
-   npm install
-   npm run dev
+### Documentation Files:
+- **[SAFE_FLOW_README.md](./SAFE_FLOW_README.md)** - Quick start guide and features overview
+- **[SAFE_FLOW_DOCUMENTATION.md](./SAFE_FLOW_DOCUMENTATION.md)** - Comprehensive API documentation
+- **[SAFE_FLOW_QUICK_REFERENCE.md](./SAFE_FLOW_QUICK_REFERENCE.md)** - Quick reference card with code snippets
+- **[IMPLEMENTATION_SUMMARY.md](./IMPLEMENTATION_SUMMARY.md)** - Implementation details and summary
+- **[FIXES_APPLIED.md](./FIXES_APPLIED.md)** - Migration guide and fixes documentation
+- **[COMPLETION_SUMMARY.md](./COMPLETION_SUMMARY.md)** - Project completion status
+
+### ✅ All Issues Fixed:
+- ✅ Deprecated `@safe-global/safe-core-sdk-types` replaced with `@safe-global/types-kit`
+- ✅ `EthersAdapter` import error fixed (updated to SDK v6 API)
+- ✅ All TypeScript errors resolved
+- ✅ Zero compilation errors
+- ✅ Production-ready code
+
+### Key Features Implemented
+
+✅ **Transaction Management**
+- Propose, confirm, and execute transactions
+- Query pending transactions
+- View transaction history
+
+✅ **Safe Information**
+- Get Safe details (owners, threshold, balance)
+- Check ownership status
+
+✅ **Owner Management**
+- Add new owners
+- Remove existing owners
+- Change confirmation threshold
+
+✅ **Multi-Network Support**
+- Ethereum Mainnet, Sepolia, Goerli, Polygon, Gnosis Chain
+
+## 🔧 Running Locally
+
+### 1. Install Dependencies
+
+```bash
+# Backend
+cd server
+npm install
+
+# Client
+cd client
+npm install
+```
+
+### 2. Configure Environment Variables
+
+Follow the setup instructions in the Environment Variables section above.
+
+### 3. Start the Backend
+
+```bash
+cd server
+npm run dev
+```
+
+Backend will run on `http://localhost:4000`
+
+### 4. Start the Frontend
+
+```bash
+cd client
+npm run dev
+```
+
+Frontend will run on `http://localhost:5173`
 
 The React app will connect to the Express API and the blockchain testnet defined in your .env.
+
+### 5. Using Safe Transactions
+
+Import and use the `SafeTransactions` component:
+
+```typescript
+import SafeTransactions from "./components/SafeTransactions";
+import { BrowserProvider } from "ethers";
+
+function App() {
+  const provider = new BrowserProvider(window.ethereum);
+  
+  return (
+    <SafeTransactions
+      safeAddress="0x123..."
+      provider={provider}
+      userAddress="0xUser..."
+    />
+  );
+}
+```
 
 🔐 Authentication Flow
 
@@ -174,17 +267,27 @@ Confirm ownership by comparing signer.getAddress() with safeSdk.getOwners()
 
 Never store private keys or secrets in the repository
 
-📚 References
+## 📚 References
 
-Safe {Core} SDK Documentation https://docs.safe.global/safe-core-aa-sdk
+### Safe Global
+- [Safe {Core} SDK Documentation](https://docs.safe.global/safe-core-aa-sdk)
+- [Safe Transaction Service API](https://docs.safe.global/learn/safe-core/safe-core-api-kit)
+- [Protocol Kit](https://docs.safe.global/sdk/protocol-kit)
+- [API Kit](https://docs.safe.global/sdk/api-kit)
 
-Safe Transaction Service API https://docs.safe.global/learn/safe-core/safe-core-api-kit
+### Web3 & Authentication
+- [Web3Auth Docs](https://web3auth.io/docs/sdk/web)
+- [ethers.js v6](https://docs.ethers.org/v6/)
 
-Web3Auth Docs https://web3auth.io/docs/sdk/web
+### Database
+- [MongoDB Atlas Docs](https://www.mongodb.com/docs/atlas/)
 
-ethers.js v5 https://docs.ethers.io/v5/
-
-MongoDB Atlas Docs https://www.mongodb.com/docs/atlas/
+### Project Documentation
+- [Safe Flow Quick Start](./SAFE_FLOW_README.md)
+- [Safe Flow API Documentation](./SAFE_FLOW_DOCUMENTATION.md)
+- [Implementation Summary](./IMPLEMENTATION_SUMMARY.md)
+- [Create Company Feature](./CREATE_COMPANY_FEATURE.md)
+- [Quick Start Guide](./QUICKSTART.md)
 
 🧾 License
 

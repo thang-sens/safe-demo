@@ -1,10 +1,5 @@
 import React, { useState } from "react";
 import { getCompanySafe } from "../lib/api";
-import {
-  proposeTransaction,
-  confirmTransaction,
-  executeTransaction,
-} from "../lib/safeFlow";
 
 interface SafeInfo {
   safeAddress: string;
@@ -26,25 +21,21 @@ const CompanyDashboard: React.FC = () => {
   };
 
   const handlePropose = () => {
-    if (safeInfo) {
-      proposeTransaction(safeInfo.safeAddress, {
-        to: "0x...",
-        value: "0",
-        data: "0x",
-      });
-    }
+    // TODO: Implement with provider
+    // Use SafeTransactions component instead
+    console.log("Use SafeTransactions component for transaction management");
   };
 
   const handleConfirm = () => {
-    if (safeInfo) {
-      confirmTransaction(safeInfo.safeAddress, "txHash");
-    }
+    // TODO: Implement with provider
+    // Use SafeTransactions component instead
+    console.log("Use SafeTransactions component for transaction management");
   };
 
   const handleExecute = () => {
-    if (safeInfo) {
-      executeTransaction(safeInfo.safeAddress, "txHash");
-    }
+    // TODO: Implement with provider
+    // Use SafeTransactions component instead
+    console.log("Use SafeTransactions component for transaction management");
   };
 
   return (
