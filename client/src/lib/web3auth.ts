@@ -62,6 +62,14 @@ export const getSigner = async () => {
   return signer;
 };
 
+export const getProvider = async (): Promise<BrowserProvider> => {
+  console.log("Getting provider from Web3Auth...");
+
+  const web3authProvider = web3auth.provider || (await login());
+  const ethersProvider = new BrowserProvider(web3authProvider);
+  return ethersProvider;
+};
+
 export const getAddress = async () => {
   const signer = await getSigner();
   return await signer.getAddress();
