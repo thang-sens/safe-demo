@@ -54,8 +54,8 @@ const initProtocolKit = async (
   const signer = await provider.getSigner();
 
   const safe = await Safe.init({
-    provider: provider as unknown as string,
-    signer: await signer.getAddress(),
+    provider: import.meta.env.VITE_INFURA_RPC_URL,
+    signer: signer.address,
     safeAddress,
   });
 
@@ -66,6 +66,8 @@ const initProtocolKit = async (
 const initApiKit = async (chainId: string): Promise<SafeApiKit> => {
   const apiKit = new SafeApiKit({
     chainId: BigInt(chainId),
+    apiKey: import.meta.env.VITE_SAFE_API_KEY,
+    // txServiceUrl: import.meta.env.VITE_SAFE_TX_SERVICE_URL,
   });
 
   return apiKit;
