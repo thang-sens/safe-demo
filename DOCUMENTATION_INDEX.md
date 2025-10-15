@@ -45,6 +45,15 @@
 ### CCIP Cross-Chain Documentation (NEW! 🔗)
 | File | Purpose | Audience |
 |------|---------|----------|
+| **[NEXT_STEPS_COMPLETE.md](NEXT_STEPS_COMPLETE.md)** | Complete implementation summary | Everyone |
+| **[CCIP_VISUAL_GUIDE.md](CCIP_VISUAL_GUIDE.md)** | Visual UI/UX guide with diagrams | Users/Designers |
+| **[CCIP_SDK_INTEGRATION_SUMMARY.md](CCIP_SDK_INTEGRATION_SUMMARY.md)** | CCIP SDK implementation summary | Developers |
+| **[CCIP_MESSAGE_TRACKING.md](CCIP_MESSAGE_TRACKING.md)** | Message tracking guide | Users/Developers |
+| **[CCIP_QUICK_START.md](CCIP_QUICK_START.md)** | Quick start guide | Users |
+| **[CCIP_INTEGRATION_GUIDE.md](CCIP_INTEGRATION_GUIDE.md)** | Detailed integration guide | Developers |
+| **[CCIP_INTEGRATION_COMPLETE.md](CCIP_INTEGRATION_COMPLETE.md)** | Integration completion summary | Everyone |
+| **[CCIP_MIGRATION_GUIDE.md](CCIP_MIGRATION_GUIDE.md)** | Migration from old projects | Ops/DevOps |
+| **[CCIP_TESTING_CHECKLIST.md](CCIP_TESTING_CHECKLIST.md)** | Testing procedures | QA/Testers |
 | **[CCIP_QUICK_START.md](CCIP_QUICK_START.md)** | Quick start guide | Everyone |
 | **[CCIP_INTEGRATION_GUIDE.md](CCIP_INTEGRATION_GUIDE.md)** | Comprehensive guide | Developers |
 | **[CCIP_INTEGRATION_COMPLETE.md](CCIP_INTEGRATION_COMPLETE.md)** | Implementation summary | Tech leads |

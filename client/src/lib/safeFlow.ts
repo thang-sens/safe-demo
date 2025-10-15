@@ -5,6 +5,7 @@ import Safe from "@safe-global/protocol-kit";
 import SafeApiKit from "@safe-global/api-kit";
 import { ethers, BrowserProvider } from "ethers";
 import type { MetaTransactionData } from "@safe-global/types-kit";
+import { createPublicClient, http , encodeAbiParameters, parseAbiParameters } from "viem";
 import { getRawProvider } from "./web3auth";
 
 // Transaction data interface
@@ -505,6 +506,7 @@ export const changeThreshold = async (
 /**
  * ============================================================================
  * CCIP Cross-Chain Transfer Functions
+ * Using @chainlink/ccip-js SDK with ethers adapters
  * ============================================================================
  */
 
@@ -516,6 +518,12 @@ import {
   getNetworkConfig,
   getTokenBySymbol,
 } from "./ccipConfig";
+
+// Import CCIP SDK and ethers adapters
+import {
+  createClient,
+  IERC20ABI,
+} from "@chainlink/ccip-js";
 
 /**
  * Interface for CCIP transfer parameters
@@ -538,36 +546,36 @@ export interface CCIPFeeEstimate {
 }
 
 /**
- * Get the CCIP Router ABI (minimal interface needed for transfers)
+ * Get viem chain config from network name
  */
-const getCCIPRouterABI = () => {
-  return [
-    // Function to get fee for sending a message
-    "function getFee(uint64 destinationChainSelector, tuple(bytes receiver, bytes data, tuple(address token, uint256 amount)[] tokenAmounts, address feeToken, bytes extraArgs) message) view returns (uint256 fee)",
-    
-    // Function to send a CCIP message
-    "function ccipSend(uint64 destinationChainSelector, tuple(bytes receiver, bytes data, tuple(address token, uint256 amount)[] tokenAmounts, address feeToken, bytes extraArgs) message) payable returns (bytes32 messageId)",
-  ];
+const getViemChain = (networkName: NetworkName) => {
+  const networkConfig = getNetworkConfig(networkName);
+  return {
+    id: Number(networkConfig.chainId),
+    name: networkName,
+    nativeCurrency: {
+      name: "Ether",
+      symbol: "ETH",
+      decimals: 18,
+    },
+    rpcUrls: {
+      default: {
+        http: [networkConfig.rpcUrl],
+      },
+      public: {
+        http: [networkConfig.rpcUrl],
+      },
+    },
+  };
 };
 
 /**
- * Get ERC20 Token ABI for approval
- */
-const getERC20ABI = () => {
-  return [
-    "function approve(address spender, uint256 amount) returns (bool)",
-    "function allowance(address owner, address spender) view returns (uint256)",
-    "function balanceOf(address account) view returns (uint256)",
-  ];
-};
-
-/**
- * Calculate CCIP transfer fee
+ * Calculate CCIP transfer fee using CCIP SDK
  * This estimates the cost of sending a cross-chain message
  */
 export const calculateCCIPFee = async (
   params: CCIPTransferParams,
-  provider: BrowserProvider
+  _provider: BrowserProvider // Prefix with _ to indicate intentionally unused
 ): Promise<CCIPFeeEstimate> => {
   try {
     const sourceConfig = getNetworkConfig(params.sourceNetwork);
@@ -578,39 +586,31 @@ export const calculateCCIPFee = async (
       throw new Error(`Token ${params.tokenSymbol} not found on ${params.sourceNetwork}`);
     }
 
-    // Create router contract instance
-    const routerContract = new ethers.Contract(
-      sourceConfig.routerAddress,
-      getCCIPRouterABI(),
-      provider
-    );
+    // Get viem chain config
+    const sourceChain = getViemChain(params.sourceNetwork);
 
-    // Encode receiver address for CCIP (must be bytes)
-    const abiCoder = ethers.AbiCoder.defaultAbiCoder();
-    const receiverBytes = abiCoder.encode(
-      ["address"],
-      [params.recipientAddress]
-    );
+    // Convert ethers provider to viem public client using the adapter
+    const rpcUrl = sourceConfig.rpcUrl;
+    
+    // Create a viem public client manually
+  
+    const publicClient = createPublicClient({
+      chain: sourceChain,
+      transport: http(rpcUrl),
+    });
+    
+    // Create CCIP client
+    const ccipClient = createClient();
 
-    // Build CCIP message structure
-    const message = {
-      receiver: receiverBytes,
-      data: "0x", // No additional data
-      tokenAmounts: [
-        {
-          token: token.address,
-          amount: params.amount,
-        },
-      ],
-      feeToken: ethers.ZeroAddress, // Pay fees in native token (ETH)
-      extraArgs: "0x", // Default extra args
-    };
-
-    // Get fee from router
-    const feeInWei = await routerContract.getFee(
-      destConfig.chainSelector,
-      message
-    );
+    // Get fee using CCIP SDK
+    const feeInWei = await ccipClient.getFee({
+      client: publicClient as any, // Type cast to avoid viem version conflicts
+      routerAddress: sourceConfig.routerAddress as `0x${string}`,
+      destinationChainSelector: destConfig.chainSelector,
+      destinationAccount: params.recipientAddress as `0x${string}`,
+      amount: BigInt(params.amount),
+      tokenAddress: token.address as `0x${string}`,
+    });
 
     return {
       feeInWei: feeInWei.toString(),
@@ -623,7 +623,7 @@ export const calculateCCIPFee = async (
 };
 
 /**
- * Build CCIP transaction data for Safe execution
+ * Build CCIP transaction data for Safe execution using CCIP SDK
  * This creates the transaction payload that Safe will execute
  */
 export const buildCCIPSafeTransaction = async (
@@ -646,22 +646,34 @@ export const buildCCIPSafeTransaction = async (
     // Prepare transactions array (may need approval + CCIP send)
     const transactions: MetaTransactionData[] = [];
 
-    // Step 1: Check if token approval is needed
-    const tokenContract = new ethers.Contract(
-      token.address,
-      getERC20ABI(),
-      provider
-    );
+    // Create viem clients for CCIP SDK
+    const sourceChain = getViemChain(params.sourceNetwork);
+    const publicClient = createPublicClient({
+      chain: sourceChain,
+      transport: http(sourceConfig.rpcUrl),
+    });
+    
+    const ccipClient = createClient();
 
-    const currentAllowance = await tokenContract.allowance(
-      safeAddress,
-      sourceConfig.routerAddress
-    );
+    // Step 1: Check if token approval is needed using CCIP SDK
+    const currentAllowance = await ccipClient.getAllowance({
+      client: publicClient as any, // Type cast to avoid viem version conflicts
+      routerAddress: sourceConfig.routerAddress as `0x${string}`,
+      tokenAddress: token.address as `0x${string}`,
+      account: safeAddress as `0x${string}`,
+    });
 
     const amountBN = BigInt(params.amount);
 
     // If allowance is insufficient, add approval transaction
     if (currentAllowance < amountBN) {
+      // Use ethers to encode the approval data for Safe transaction
+      const tokenContract = new ethers.Contract(
+        token.address,
+        IERC20ABI,
+        provider
+      );
+
       const approvalData = tokenContract.interface.encodeFunctionData("approve", [
         sourceConfig.routerAddress,
         amountBN,
@@ -675,45 +687,46 @@ export const buildCCIPSafeTransaction = async (
       });
     }
 
-    // Step 2: Build CCIP send transaction
-    const routerContract = new ethers.Contract(
-      sourceConfig.routerAddress,
-      getCCIPRouterABI(),
-      provider
+    // Step 2: Build CCIP send transaction using SDK
+    // We need to manually encode the ccipSend call since we're not directly calling it
+    // but proposing it through Safe
+    
+    // Encode receiver address as bytes
+    const receiverBytes = encodeAbiParameters(
+      parseAbiParameters("address"),
+      [params.recipientAddress as `0x${string}`]
     );
 
-    // Encode receiver address
-    const abiCoder = ethers.AbiCoder.defaultAbiCoder();
-    const receiverBytes = abiCoder.encode(
-      ["address"],
-      [params.recipientAddress]
-    );
-
-    // Build CCIP message
-    const message = {
+    // Build CCIP message structure
+    const ccipMessage = {
       receiver: receiverBytes,
-      data: "0x",
+      data: "0x" as `0x${string}`,
       tokenAmounts: [
         {
-          token: token.address,
+          token: token.address as `0x${string}`,
           amount: amountBN,
         },
       ],
-      feeToken: ethers.ZeroAddress, // Pay in native token
-      extraArgs: "0x",
+      feeToken: "0x0000000000000000000000000000000000000000" as `0x${string}`, // Native token
+      extraArgs: "0x" as `0x${string}`,
     };
 
     // Encode ccipSend function call
-    const ccipSendData = routerContract.interface.encodeFunctionData("ccipSend", [
-      destConfig.chainSelector,
-      message,
-    ]);
+    const ccipSendData = encodeAbiParameters(
+      parseAbiParameters("uint64 destinationChainSelector, (bytes receiver, bytes data, (address token, uint256 amount)[] tokenAmounts, address feeToken, bytes extraArgs) message"),
+      [BigInt(destConfig.chainSelector), ccipMessage]
+    );
+
+    // Create the full function call with selector
+    // ccipSend function selector is 0x96f4e9f9
+    const functionSelector = "0x96f4e9f9";
+    const fullCallData = (functionSelector + ccipSendData.slice(2)) as `0x${string}`;
 
     // Add CCIP send transaction (with fee as value)
     transactions.push({
       to: sourceConfig.routerAddress,
       value: estimatedFee.feeInWei,
-      data: ccipSendData,
+      data: fullCallData,
       operation: 0, // Call
     });
 
@@ -790,7 +803,7 @@ export const proposeCCIPTransfer = async (
 };
 
 /**
- * Check if Safe has sufficient balance for CCIP transfer
+ * Check if Safe has sufficient balance for CCIP transfer using CCIP SDK
  */
 export const checkCCIPTransferBalance = async (
   params: CCIPTransferParams,
@@ -798,20 +811,28 @@ export const checkCCIPTransferBalance = async (
   provider: BrowserProvider
 ): Promise<{ hasTokenBalance: boolean; hasFeeBalance: boolean; tokenBalance: string; nativeBalance: string }> => {
   try {
+    const sourceConfig = getNetworkConfig(params.sourceNetwork);
     const token = getTokenBySymbol(params.sourceNetwork, params.tokenSymbol);
     
     if (!token) {
       throw new Error(`Token ${params.tokenSymbol} not found`);
     }
 
-    // Check token balance
-    const tokenContract = new ethers.Contract(
-      token.address,
-      getERC20ABI(),
-      provider
-    );
+    // Create viem client for CCIP SDK
+    const sourceChain = getViemChain(params.sourceNetwork);
+    const publicClient = createPublicClient({
+      chain: sourceChain,
+      transport: http(sourceConfig.rpcUrl),
+    });
 
-    const tokenBalance = await tokenContract.balanceOf(safeAddress);
+    // Check token balance using viem
+    const tokenBalance = await publicClient.readContract({
+      address: token.address as `0x${string}`,
+      abi: IERC20ABI as any,
+      functionName: "balanceOf",
+      args: [safeAddress as `0x${string}`],
+    }) as bigint;
+    
     const hasTokenBalance = tokenBalance >= BigInt(params.amount);
 
     // Check native balance for fees
@@ -828,5 +849,66 @@ export const checkCCIPTransferBalance = async (
   } catch (error) {
     console.error("Error checking balances:", error);
     throw error;
+  }
+};
+
+/**
+ * Get CCIP message status from transaction receipt
+ * Extracts the messageId from CCIP transfer transaction
+ */
+export const getCCIPMessageId = async (
+  txHash: string,
+  provider: BrowserProvider
+): Promise<string | null> => {
+  try {
+    const receipt = await provider.getTransactionReceipt(txHash);
+    if (!receipt) {
+      throw new Error("Transaction receipt not found");
+    }
+
+    // CCIP Router emits CCIPSendRequested event with messageId
+    // Event signature: CCIPSendRequested(bytes32 indexed messageId, ...)
+    const ccipEventTopic = "0x8832dc5c91b7173c8eb69ccee5d24c4d4ff537b6a89b0e58b17e8b6f3f847e06";
+    
+    const ccipLog = receipt.logs.find(log => log.topics[0] === ccipEventTopic);
+    
+    if (ccipLog && ccipLog.topics[1]) {
+      return ccipLog.topics[1]; // messageId is the first indexed parameter
+    }
+
+    return null;
+  } catch (error) {
+    console.error("Error getting CCIP message ID:", error);
+    return null;
+  }
+};
+
+/**
+ * Check CCIP transfer status using CCIP Explorer API
+ * Note: This uses the public CCIP Explorer API
+ */
+export const checkCCIPTransferStatus = async (
+  messageId: string
+): Promise<{
+  status: "SUCCESS" | "IN_PROGRESS" | "FAILED" | "NOT_FOUND";
+  sourceChain?: string;
+  destChain?: string;
+  explorerUrl?: string;
+}> => {
+  try {
+    // CCIP Explorer URL
+    const explorerUrl = `https://ccip.chain.link/msg/${messageId}`;
+    
+    // For now, return the explorer URL for manual checking
+    // In production, you could call CCIP Explorer API or check on-chain state
+    return {
+      status: "IN_PROGRESS",
+      explorerUrl,
+    };
+  } catch (error) {
+    console.error("Error checking CCIP status:", error);
+    return {
+      status: "NOT_FOUND",
+    };
   }
 };

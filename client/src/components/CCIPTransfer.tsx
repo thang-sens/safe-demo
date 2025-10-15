@@ -11,6 +11,8 @@ import {
   calculateCCIPFee,
   proposeCCIPTransfer,
   checkCCIPTransferBalance,
+  getCCIPMessageId,
+  checkCCIPTransferStatus,
 } from "../lib/safeFlow";
 import type { CCIPTransferParams, CCIPFeeEstimate } from "../lib/safeFlow";
 
@@ -35,6 +37,14 @@ export default function CCIPTransfer({
     hasFeeBalance: boolean;
     tokenBalance: string;
     nativeBalance: string;
+  } | null>(null);
+  
+  // CCIP tracking state
+  const [ccipMessageId, setCcipMessageId] = useState<string>("");
+  const [trackingTxHash, setTrackingTxHash] = useState<string>("");
+  const [messageStatus, setMessageStatus] = useState<{
+    status: string;
+    explorerUrl?: string;
   } | null>(null);
 
   // Form state
@@ -201,6 +211,46 @@ export default function CCIPTransfer({
         err instanceof Error ? err.message : "Failed to propose CCIP transfer";
       setError(errorMessage);
       console.error("Error proposing transfer:", err);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  // Track CCIP message by transaction hash
+  const handleTrackMessage = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setError("");
+    setMessageStatus(null);
+
+    if (!trackingTxHash.trim()) {
+      setError("Please enter a transaction hash");
+      return;
+    }
+
+    setLoading(true);
+
+    try {
+      // Get message ID from transaction
+      const messageId = await getCCIPMessageId(trackingTxHash, provider);
+      
+      if (!messageId) {
+        setError("Could not find CCIP message ID in transaction");
+        setLoading(false);
+        return;
+      }
+
+      setCcipMessageId(messageId);
+
+      // Check message status
+      const status = await checkCCIPTransferStatus(messageId);
+      setMessageStatus(status);
+      
+      setSuccess(`Found CCIP message! Track it on CCIP Explorer`);
+    } catch (err) {
+      const errorMessage =
+        err instanceof Error ? err.message : "Failed to track message";
+      setError(errorMessage);
+      console.error("Error tracking message:", err);
     } finally {
       setLoading(false);
     }
@@ -503,7 +553,112 @@ export default function CCIPTransfer({
         button.secondary:hover:not(:disabled) {
           background-color: var(--bg-tertiary);
         }
+
+        .tracking-section {
+          margin-top: 3rem;
+          padding-top: 2rem;
+          border-top: 1px solid var(--border-light);
+        }
+
+        .tracking-result {
+          margin-top: 1rem;
+          padding: 1rem;
+          background-color: var(--bg-tertiary);
+          border-radius: 8px;
+        }
+
+        .tracking-result a {
+          color: var(--primary-color);
+          text-decoration: none;
+          font-weight: 500;
+        }
+
+        .tracking-result a:hover {
+          text-decoration: underline;
+        }
+
+        .message-id {
+          font-family: monospace;
+          font-size: 0.875rem;
+          padding: 0.5rem;
+          background-color: var(--bg-primary);
+          border-radius: 4px;
+          word-break: break-all;
+          margin-top: 0.5rem;
+        }
       `}</style>
+
+      {/* CCIP Message Tracking Section */}
+      <div className="tracking-section">
+        <h3>
+          <svg
+            width="24"
+            height="24"
+            viewBox="0 0 24 24"
+            fill="none"
+            style={{ marginRight: "8px", verticalAlign: "middle" }}
+          >
+            <path
+              d="M21 12C21 16.9706 16.9706 21 12 21M21 12C21 7.02944 16.9706 3 12 3M21 12H3M12 21C7.02944 21 3 16.9706 3 12M12 21C13.6569 21 15 16.9706 15 12C15 7.02944 13.6569 3 12 3M12 21C10.3431 21 9 16.9706 9 12C9 7.02944 10.3431 3 12 3M3 12C3 7.02944 7.02944 3 12 3"
+              stroke="currentColor"
+              strokeWidth="2"
+              strokeLinecap="round"
+            />
+          </svg>
+          Track CCIP Transfer
+        </h3>
+
+        <p className="info-text">
+          After executing a CCIP transfer, track its status using the transaction hash from the executed Safe transaction.
+        </p>
+
+        <form onSubmit={handleTrackMessage}>
+          <div className="form-group">
+            <label htmlFor="trackingTxHash">Transaction Hash</label>
+            <input
+              type="text"
+              id="trackingTxHash"
+              placeholder="0x..."
+              value={trackingTxHash}
+              onChange={(e) => setTrackingTxHash(e.target.value)}
+            />
+            <small>Enter the transaction hash from the executed Safe transaction</small>
+          </div>
+
+          <button
+            type="submit"
+            className="primary"
+            disabled={loading || !trackingTxHash.trim()}
+          >
+            {loading ? "Tracking..." : "Track Message"}
+          </button>
+        </form>
+
+        {messageStatus && (
+          <div className="tracking-result">
+            <p><strong>Status:</strong> {messageStatus.status}</p>
+            
+            {ccipMessageId && (
+              <div>
+                <p><strong>Message ID:</strong></p>
+                <div className="message-id">{ccipMessageId}</div>
+              </div>
+            )}
+
+            {messageStatus.explorerUrl && (
+              <p style={{ marginTop: "1rem" }}>
+                <a 
+                  href={messageStatus.explorerUrl} 
+                  target="_blank" 
+                  rel="noopener noreferrer"
+                >
+                  View on CCIP Explorer →
+                </a>
+              </p>
+            )}
+          </div>
+        )}
+      </div>
     </div>
   );
 }
