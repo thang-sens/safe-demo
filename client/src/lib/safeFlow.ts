@@ -5,6 +5,7 @@ import Safe from "@safe-global/protocol-kit";
 import SafeApiKit from "@safe-global/api-kit";
 import { ethers, BrowserProvider } from "ethers";
 import type { MetaTransactionData } from "@safe-global/types-kit";
+import { getRawProvider } from "./web3auth";
 
 // Transaction data interface
 export interface TransactionData {
@@ -53,9 +54,13 @@ const initProtocolKit = async (
 ): Promise<Safe> => {
   const signer = await provider.getSigner();
 
+  // Get the raw Web3Auth provider which supports eth_signTypedData_v4
+  // BrowserProvider is just a wrapper and doesn't expose the signing methods
+  const rawProvider = await getRawProvider();
+
   const safe = await Safe.init({
-    provider: import.meta.env.VITE_INFURA_RPC_URL,
-    signer: signer.address,
+    provider: rawProvider as unknown as string, // Raw Web3Auth provider for signing
+    signer: await signer.getAddress(),
     safeAddress,
   });
 
