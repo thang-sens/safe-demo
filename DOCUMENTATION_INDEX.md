@@ -42,6 +42,15 @@
 | **[OWNER_MANAGEMENT_SYNC.md](OWNER_MANAGEMENT_SYNC.md)** | Architecture & flow | Architects |
 | **[MIGRATION_GUIDE.md](MIGRATION_GUIDE.md)** | Migrate existing data | Ops/DevOps |
 
+### CCIP Cross-Chain Documentation (NEW! 🔗)
+| File | Purpose | Audience |
+|------|---------|----------|
+| **[CCIP_QUICK_START.md](CCIP_QUICK_START.md)** | Quick start guide | Everyone |
+| **[CCIP_INTEGRATION_GUIDE.md](CCIP_INTEGRATION_GUIDE.md)** | Comprehensive guide | Developers |
+| **[CCIP_INTEGRATION_COMPLETE.md](CCIP_INTEGRATION_COMPLETE.md)** | Implementation summary | Tech leads |
+| **[CCIP_TESTING_CHECKLIST.md](CCIP_TESTING_CHECKLIST.md)** | Testing guide | QA/Testers |
+| **[CCIP_MIGRATION_GUIDE.md](CCIP_MIGRATION_GUIDE.md)** | Migration steps | Developers |
+
 ### Enhancement Ideas
 | File | Purpose | Audience |
 |------|---------|----------|

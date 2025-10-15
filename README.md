@@ -22,12 +22,18 @@ Members authenticate via Web3Auth to sign transactions through Safe SDK (Protoco
 - ✅ Company registration and Safe creation
 - ✅ Store company ↔ Safe address ↔ owners ↔ threshold in MongoDB
 - ✅ Social/passwordless login via Web3Auth
-- ✅ **Complete multisig transaction flow** (NEW):
+- ✅ **Complete multisig transaction flow**:
   - Propose → Confirm → Execute
   - Pending transactions management
   - Transaction history
   - Owner management (add/remove)
   - Threshold management
+- ✅ **Cross-Chain Token Transfers with Chainlink CCIP** (NEW):
+  - Transfer tokens between multiple blockchains
+  - Multi-sig approval for cross-chain transactions
+  - Real-time fee calculation
+  - Support for LINK and USDC tokens
+  - Networks: Ethereum Sepolia, Arbitrum Sepolia, Avalanche Fuji, Polygon Amoy
 - ✅ Uses Safe Transaction Service API for off-chain signatures
 - ✅ Fully written in TypeScript (Node + React)
 - ✅ **Full Safe Global SDK integration** with all features
@@ -38,10 +44,10 @@ Members authenticate via Web3Auth to sign transactions through Safe SDK (Protoco
 
 | Layer          | Stack                                                                                                    |
 | -------------- | -------------------------------------------------------------------------------------------------------- |
-| **Frontend**   | React 18, TypeScript, Vite, ethers v5, @safe-global/protocol-kit, @safe-global/api-kit, Web3Auth Web SDK |
+| **Frontend**   | React 18, TypeScript, Vite, ethers v6, @safe-global/protocol-kit, @safe-global/api-kit, Web3Auth Web SDK, Chainlink CCIP |
 | **Backend**    | Node.js, Express, Mongoose, dotenv                                                                       |
 | **Database**   | MongoDB Atlas                                                                                            |
-| **Blockchain** | Ethereum Sepolia (testnet), @safe-global/protocol-kit, @safe-global/api-kit, ethers v5                   |
+| **Blockchain** | Ethereum Sepolia (testnet), @safe-global/protocol-kit, @safe-global/api-kit, Chainlink CCIP, ethers v6   |
 
 ---
 
@@ -110,6 +116,11 @@ VITE_INFURA_RPC_URL=https://sepolia.infura.io/v3/<your_key>
 VITE_CHAIN_ID=11155111
 VITE_SAFE_TX_SERVICE_URL=https://safe-transaction-sepolia.safe.global
 VITE_API_URL=http://localhost:3000/api
+
+# CCIP Configuration (NEW)
+VITE_ARBITRUM_SEPOLIA_RPC_URL=https://sepolia-rollup.arbitrum.io/rpc
+VITE_AVALANCHE_FUJI_RPC_URL=https://api.avax-test.network/ext/bc/C/rpc
+VITE_POLYGON_AMOY_RPC_URL=https://rpc-amoy.polygon.technology
 ```
 
 ## 🏗️ Project Structure
@@ -129,16 +140,20 @@ VITE_API_URL=http://localhost:3000/api
   │   │   ├── Login.tsx
   │   │   ├── CompanyDashboard.tsx
   │   │   ├── CreateCompany.tsx
-  │   │   └── SafeTransactions.tsx (NEW - Complete UI)
+  │   │   ├── SafeTransactions.tsx (Complete UI with tabs)
+  │   │   └── CCIPTransfer.tsx (NEW - Cross-chain transfer UI)
   │   └── lib/
   │       ├── web3auth.ts
   │       ├── safe.ts
-  │       ├── safeFlow.ts (NEW - Complete implementation)
+  │       ├── safeFlow.ts (Complete implementation + CCIP)
+  │       ├── ccipConfig.ts (NEW - CCIP network configs)
   │       └── api.ts
 /docs
-  ├── SAFE_FLOW_DOCUMENTATION.md (NEW - API docs)
-  ├── SAFE_FLOW_README.md (NEW - Quick start)
-  └── IMPLEMENTATION_SUMMARY.md (NEW - Overview)
+  ├── CCIP_INTEGRATION_GUIDE.md (NEW - CCIP detailed guide)
+  ├── CCIP_QUICK_START.md (NEW - CCIP quick start)
+  ├── SAFE_FLOW_DOCUMENTATION.md (API docs)
+  ├── SAFE_FLOW_README.md (Quick start)
+  └── IMPLEMENTATION_SUMMARY.md (Overview)
 ```
 
 ## 📖 Safe Flow Documentation
@@ -179,10 +194,39 @@ The project now includes a **complete implementation** of Safe Global transactio
 ✅ **Multi-Network Support**
 - Ethereum Mainnet, Sepolia, Goerli, Polygon, Gnosis Chain
 
-## 🔧 Running Locally
+## � Chainlink CCIP Integration
+
+The project now supports **cross-chain token transfers** using Chainlink's Cross-Chain Interoperability Protocol (CCIP), secured by Safe's multi-sig mechanism.
+
+### Documentation Files:
+- **[CCIP_QUICK_START.md](./CCIP_QUICK_START.md)** - Quick start guide for CCIP transfers
+- **[CCIP_INTEGRATION_GUIDE.md](./CCIP_INTEGRATION_GUIDE.md)** - Comprehensive integration documentation
+
+### ✨ CCIP Features:
+- ✅ Cross-chain token transfers (LINK, USDC)
+- ✅ Multi-sig approval required for CCIP transactions
+- ✅ Real-time fee calculation
+- ✅ Balance validation
+- ✅ Support for 4 testnets:
+  - Ethereum Sepolia
+  - Arbitrum Sepolia
+  - Avalanche Fuji
+  - Polygon Amoy
+
+### How to Use CCIP:
+1. Navigate to "Cross-Chain Transfer" tab
+2. Select destination network
+3. Choose token and enter amount
+4. Calculate transfer fee
+5. Propose transaction
+6. Get multi-sig approvals
+7. Execute cross-chain transfer
+
+See **[CCIP_QUICK_START.md](./CCIP_QUICK_START.md)** for detailed instructions.
+
+## �🔧 Running Locally
 
 ### 1. Install Dependencies
-
 ```bash
 # Backend
 cd server

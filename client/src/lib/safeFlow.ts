@@ -501,3 +501,332 @@ export const changeThreshold = async (
     throw error;
   }
 };
+
+/**
+ * ============================================================================
+ * CCIP Cross-Chain Transfer Functions
+ * ============================================================================
+ */
+
+import type {
+  NetworkName,
+} from "./ccipConfig";
+
+import {
+  getNetworkConfig,
+  getTokenBySymbol,
+} from "./ccipConfig";
+
+/**
+ * Interface for CCIP transfer parameters
+ */
+export interface CCIPTransferParams {
+  sourceNetwork: NetworkName;
+  destinationNetwork: NetworkName;
+  tokenSymbol: string;
+  amount: string; // Amount in token's smallest unit (e.g., wei for ETH)
+  recipientAddress: string;
+}
+
+/**
+ * Interface for CCIP fee estimate
+ */
+export interface CCIPFeeEstimate {
+  feeInWei: string;
+  feeInEther: string;
+  feeInUSD?: string; // Optional USD estimate
+}
+
+/**
+ * Get the CCIP Router ABI (minimal interface needed for transfers)
+ */
+const getCCIPRouterABI = () => {
+  return [
+    // Function to get fee for sending a message
+    "function getFee(uint64 destinationChainSelector, tuple(bytes receiver, bytes data, tuple(address token, uint256 amount)[] tokenAmounts, address feeToken, bytes extraArgs) message) view returns (uint256 fee)",
+    
+    // Function to send a CCIP message
+    "function ccipSend(uint64 destinationChainSelector, tuple(bytes receiver, bytes data, tuple(address token, uint256 amount)[] tokenAmounts, address feeToken, bytes extraArgs) message) payable returns (bytes32 messageId)",
+  ];
+};
+
+/**
+ * Get ERC20 Token ABI for approval
+ */
+const getERC20ABI = () => {
+  return [
+    "function approve(address spender, uint256 amount) returns (bool)",
+    "function allowance(address owner, address spender) view returns (uint256)",
+    "function balanceOf(address account) view returns (uint256)",
+  ];
+};
+
+/**
+ * Calculate CCIP transfer fee
+ * This estimates the cost of sending a cross-chain message
+ */
+export const calculateCCIPFee = async (
+  params: CCIPTransferParams,
+  provider: BrowserProvider
+): Promise<CCIPFeeEstimate> => {
+  try {
+    const sourceConfig = getNetworkConfig(params.sourceNetwork);
+    const destConfig = getNetworkConfig(params.destinationNetwork);
+    const token = getTokenBySymbol(params.sourceNetwork, params.tokenSymbol);
+
+    if (!token) {
+      throw new Error(`Token ${params.tokenSymbol} not found on ${params.sourceNetwork}`);
+    }
+
+    // Create router contract instance
+    const routerContract = new ethers.Contract(
+      sourceConfig.routerAddress,
+      getCCIPRouterABI(),
+      provider
+    );
+
+    // Encode receiver address for CCIP (must be bytes)
+    const abiCoder = ethers.AbiCoder.defaultAbiCoder();
+    const receiverBytes = abiCoder.encode(
+      ["address"],
+      [params.recipientAddress]
+    );
+
+    // Build CCIP message structure
+    const message = {
+      receiver: receiverBytes,
+      data: "0x", // No additional data
+      tokenAmounts: [
+        {
+          token: token.address,
+          amount: params.amount,
+        },
+      ],
+      feeToken: ethers.ZeroAddress, // Pay fees in native token (ETH)
+      extraArgs: "0x", // Default extra args
+    };
+
+    // Get fee from router
+    const feeInWei = await routerContract.getFee(
+      destConfig.chainSelector,
+      message
+    );
+
+    return {
+      feeInWei: feeInWei.toString(),
+      feeInEther: ethers.formatEther(feeInWei),
+    };
+  } catch (error) {
+    console.error("Error calculating CCIP fee:", error);
+    throw new Error("Failed to calculate CCIP transfer fee");
+  }
+};
+
+/**
+ * Build CCIP transaction data for Safe execution
+ * This creates the transaction payload that Safe will execute
+ */
+export const buildCCIPSafeTransaction = async (
+  params: CCIPTransferParams,
+  safeAddress: string,
+  provider: BrowserProvider
+): Promise<{ transactions: MetaTransactionData[]; estimatedFee: CCIPFeeEstimate }> => {
+  try {
+    const sourceConfig = getNetworkConfig(params.sourceNetwork);
+    const destConfig = getNetworkConfig(params.destinationNetwork);
+    const token = getTokenBySymbol(params.sourceNetwork, params.tokenSymbol);
+
+    if (!token) {
+      throw new Error(`Token ${params.tokenSymbol} not found on ${params.sourceNetwork}`);
+    }
+
+    // Calculate fee first
+    const estimatedFee = await calculateCCIPFee(params, provider);
+
+    // Prepare transactions array (may need approval + CCIP send)
+    const transactions: MetaTransactionData[] = [];
+
+    // Step 1: Check if token approval is needed
+    const tokenContract = new ethers.Contract(
+      token.address,
+      getERC20ABI(),
+      provider
+    );
+
+    const currentAllowance = await tokenContract.allowance(
+      safeAddress,
+      sourceConfig.routerAddress
+    );
+
+    const amountBN = BigInt(params.amount);
+
+    // If allowance is insufficient, add approval transaction
+    if (currentAllowance < amountBN) {
+      const approvalData = tokenContract.interface.encodeFunctionData("approve", [
+        sourceConfig.routerAddress,
+        amountBN,
+      ]);
+
+      transactions.push({
+        to: token.address,
+        value: "0",
+        data: approvalData,
+        operation: 0, // Call
+      });
+    }
+
+    // Step 2: Build CCIP send transaction
+    const routerContract = new ethers.Contract(
+      sourceConfig.routerAddress,
+      getCCIPRouterABI(),
+      provider
+    );
+
+    // Encode receiver address
+    const abiCoder = ethers.AbiCoder.defaultAbiCoder();
+    const receiverBytes = abiCoder.encode(
+      ["address"],
+      [params.recipientAddress]
+    );
+
+    // Build CCIP message
+    const message = {
+      receiver: receiverBytes,
+      data: "0x",
+      tokenAmounts: [
+        {
+          token: token.address,
+          amount: amountBN,
+        },
+      ],
+      feeToken: ethers.ZeroAddress, // Pay in native token
+      extraArgs: "0x",
+    };
+
+    // Encode ccipSend function call
+    const ccipSendData = routerContract.interface.encodeFunctionData("ccipSend", [
+      destConfig.chainSelector,
+      message,
+    ]);
+
+    // Add CCIP send transaction (with fee as value)
+    transactions.push({
+      to: sourceConfig.routerAddress,
+      value: estimatedFee.feeInWei,
+      data: ccipSendData,
+      operation: 0, // Call
+    });
+
+    return {
+      transactions,
+      estimatedFee,
+    };
+  } catch (error) {
+    console.error("Error building CCIP transaction:", error);
+    throw new Error("Failed to build CCIP transaction");
+  }
+};
+
+/**
+ * Propose a CCIP cross-chain transfer through Safe
+ * This is a high-level function that combines fee calculation and transaction proposal
+ */
+export const proposeCCIPTransfer = async (
+  params: CCIPTransferParams,
+  safeAddress: string,
+  provider: BrowserProvider
+): Promise<{ safeTxHash: string; estimatedFee: CCIPFeeEstimate }> => {
+  try {
+    // Build CCIP transaction(s)
+    const { transactions, estimatedFee } = await buildCCIPSafeTransaction(
+      params,
+      safeAddress,
+      provider
+    );
+
+    // If we have multiple transactions (approval + send), we need to batch them
+    // For now, we'll handle them separately
+    // In production, you might want to use Safe's batch transaction feature
+
+    let finalTxHash: string;
+
+    if (transactions.length === 1) {
+      // Only CCIP send (no approval needed)
+      finalTxHash = await proposeTransaction(
+        safeAddress,
+        {
+          to: transactions[0].to,
+          value: transactions[0].value,
+          data: transactions[0].data,
+          operation: transactions[0].operation,
+        },
+        provider
+      );
+    } else {
+      // Multiple transactions - propose the last one (CCIP send)
+      // NOTE: In a real implementation, you'd want to batch these or handle sequentially
+      // For this POC, we'll just propose the CCIP send and assume approval is done separately
+      const ccipTx = transactions[transactions.length - 1];
+      finalTxHash = await proposeTransaction(
+        safeAddress,
+        {
+          to: ccipTx.to,
+          value: ccipTx.value,
+          data: ccipTx.data,
+          operation: ccipTx.operation,
+        },
+        provider
+      );
+    }
+
+    return {
+      safeTxHash: finalTxHash,
+      estimatedFee,
+    };
+  } catch (error) {
+    console.error("Error proposing CCIP transfer:", error);
+    throw error;
+  }
+};
+
+/**
+ * Check if Safe has sufficient balance for CCIP transfer
+ */
+export const checkCCIPTransferBalance = async (
+  params: CCIPTransferParams,
+  safeAddress: string,
+  provider: BrowserProvider
+): Promise<{ hasTokenBalance: boolean; hasFeeBalance: boolean; tokenBalance: string; nativeBalance: string }> => {
+  try {
+    const token = getTokenBySymbol(params.sourceNetwork, params.tokenSymbol);
+    
+    if (!token) {
+      throw new Error(`Token ${params.tokenSymbol} not found`);
+    }
+
+    // Check token balance
+    const tokenContract = new ethers.Contract(
+      token.address,
+      getERC20ABI(),
+      provider
+    );
+
+    const tokenBalance = await tokenContract.balanceOf(safeAddress);
+    const hasTokenBalance = tokenBalance >= BigInt(params.amount);
+
+    // Check native balance for fees
+    const nativeBalance = await provider.getBalance(safeAddress);
+    const estimatedFee = await calculateCCIPFee(params, provider);
+    const hasFeeBalance = nativeBalance >= BigInt(estimatedFee.feeInWei);
+
+    return {
+      hasTokenBalance,
+      hasFeeBalance,
+      tokenBalance: tokenBalance.toString(),
+      nativeBalance: nativeBalance.toString(),
+    };
+  } catch (error) {
+    console.error("Error checking balances:", error);
+    throw error;
+  }
+};

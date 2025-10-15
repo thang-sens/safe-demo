@@ -13,6 +13,7 @@ import {
 import type { TransactionData, SafeTransaction } from "../lib/safeFlow";
 import { getSafeInfo, getChainId } from "../lib/safe";
 import { syncCompanyData } from "../lib/api";
+import CCIPTransfer from "./CCIPTransfer";
 
 interface SafeTransactionsProps {
   safeAddress: string;
@@ -38,6 +39,7 @@ export default function SafeTransactions({
   const [safeInfo, setSafeInfo] = useState<SafeInfo | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string>("");
+  const [activeTab, setActiveTab] = useState<"transactions" | "ccip" | "owners">("transactions");
 
   // Form states
   const [txForm, setTxForm] = useState<TransactionData>({
@@ -273,6 +275,38 @@ export default function SafeTransactions({
 
       {error && <div className="error">{error}</div>}
 
+      {/* Tab Navigation */}
+      <div className="tabs">
+        <button
+          className={activeTab === "transactions" ? "tab-button active" : "tab-button"}
+          onClick={() => setActiveTab("transactions")}
+        >
+          <svg width="20" height="20" viewBox="0 0 20 20" fill="none" style={{ marginRight: '6px' }}>
+            <path d="M3 8L10 3L17 8M4 9V16C4 16.5523 4.44772 17 5 17H15C15.5523 17 16 16.5523 16 16V9" stroke="currentColor" strokeWidth="2" strokeLinecap="round"/>
+          </svg>
+          Transactions
+        </button>
+        <button
+          className={activeTab === "ccip" ? "tab-button active" : "tab-button"}
+          onClick={() => setActiveTab("ccip")}
+        >
+          <svg width="20" height="20" viewBox="0 0 20 20" fill="none" style={{ marginRight: '6px' }}>
+            <path d="M14 6L18 10M18 10L14 14M18 10H2" stroke="currentColor" strokeWidth="2" strokeLinecap="round"/>
+          </svg>
+          Cross-Chain Transfer
+        </button>
+        <button
+          className={activeTab === "owners" ? "tab-button active" : "tab-button"}
+          onClick={() => setActiveTab("owners")}
+        >
+          <svg width="20" height="20" viewBox="0 0 20 20" fill="none" style={{ marginRight: '6px' }}>
+            <path d="M13 7C13 8.65685 11.6569 10 10 10C8.34315 10 7 8.65685 7 7C7 5.34315 8.34315 4 10 4C11.6569 4 13 5.34315 13 7Z" stroke="currentColor" strokeWidth="2"/>
+            <path d="M5 16C5 13.7909 6.79086 12 9 12H11C13.2091 12 15 13.7909 15 16V17H5V16Z" stroke="currentColor" strokeWidth="2"/>
+          </svg>
+          Owner Management
+        </button>
+      </div>
+
       {/* Safe Info */}
       {safeInfo && (
         <div className="safe-info">
@@ -305,8 +339,11 @@ export default function SafeTransactions({
         </div>
       )}
 
-      {/* Propose Transaction Form */}
-      <div className="propose-transaction">
+      {/* Tab Content */}
+      {activeTab === "transactions" && (
+        <>
+          {/* Propose Transaction Form */}
+          <div className="propose-transaction">
         <h3>Propose New Transaction</h3>
         <form onSubmit={handleProposeTransaction}>
           <div>
@@ -438,8 +475,21 @@ export default function SafeTransactions({
           </div>
         )}
       </div>
+        </>
+      )}
 
-      {/* Owner Management */}
+      {/* CCIP Tab Content */}
+      {activeTab === "ccip" && (
+        <CCIPTransfer
+          safeAddress={safeAddress}
+          provider={provider}
+          userAddress={userAddress}
+          onSuccess={loadSafeData}
+        />
+      )}
+
+      {/* Owner Management Tab Content */}
+      {activeTab === "owners" && (
       <div className="owner-management">
         <h3>Owner Management</h3>
 
@@ -525,12 +575,47 @@ export default function SafeTransactions({
           </button>
         </form>
       </div>
+      )}
 
       <style>{`
         .safe-transactions {
           max-width: 1200px;
           margin: 0 auto;
           padding: 20px;
+        }
+
+        .tabs {
+          display: flex;
+          gap: 0.5rem;
+          margin-bottom: 1.5rem;
+          border-bottom: 2px solid var(--border-light);
+          padding-bottom: 0.5rem;
+        }
+
+        .tab-button {
+          display: flex;
+          align-items: center;
+          padding: 0.625rem 1.25rem;
+          background-color: transparent;
+          color: var(--text-secondary);
+          border: none;
+          border-bottom: 3px solid transparent;
+          font-size: 0.875rem;
+          font-weight: 500;
+          cursor: pointer;
+          transition: all 0.2s ease;
+        }
+
+        .tab-button:hover {
+          color: var(--text-primary);
+          background-color: var(--bg-tertiary);
+          border-radius: 8px 8px 0 0;
+        }
+
+        .tab-button.active {
+          color: var(--primary-color);
+          border-bottom-color: var(--primary-color);
+          font-weight: 600;
         }
 
         .safe-info {

@@ -10,6 +10,8 @@
     "preview": "vite preview"
   },
   "dependencies": {
+    "@chainlink/ccip-js": "^0.2.6",
+    "@chainlink/ccip-react-components": "^0.3.1",
     "@safe-global/api-kit": "^4.0.0",
     "@safe-global/protocol-kit": "^6.1.1",
     "@safe-global/types-kit": "^3.0.0",
