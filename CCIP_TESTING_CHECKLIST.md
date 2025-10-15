@@ -94,11 +94,19 @@ Lấy testnet tokens từ faucets:
 
 ### Phase 7: Transaction Execution
 - [ ] Click "Execute"
+- [ ] **IMPORTANT**: Signatures are automatically sorted by owner address (GS013 fix applied)
 - [ ] Transaction được submit lên blockchain
 - [ ] Loading state trong khi chờ confirmation
 - [ ] Success message khi execute thành công
+- [ ] **No GS013 error** (signature validation passes)
 - [ ] Transaction chuyển sang "Executed" status
 - [ ] Transaction xuất hiện trong History
+- [ ] Transaction hash: 0x...
+
+**Common Execution Errors:**
+- ❌ **GS013** → FIXED: Signatures now auto-sorted by address
+- ❌ Insufficient gas → Add more ETH to Safe
+- ❌ Nonce mismatch → Reject old txs and re-propose
 
 ### Phase 8: Cross-Chain Verification
 - [ ] Copy transaction hash

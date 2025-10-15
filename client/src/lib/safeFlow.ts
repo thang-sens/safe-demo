@@ -194,6 +194,7 @@ export const confirmTransaction = async (
 /**
  * Execute a transaction once threshold is reached
  * This submits the transaction to the blockchain
+ * UPDATED: Added signature sorting fix for GS013 error - v2 with debug logging
  */
 export const executeTransaction = async (
   safeAddress: string,
@@ -224,7 +225,7 @@ export const executeTransaction = async (
       );
     }
 
-    // Create Safe transaction object with all signatures
+    // Create Safe transaction object with exact same parameters as when proposed
     const safeTransaction = await safe.createTransaction({
       transactions: [
         {
@@ -236,11 +237,27 @@ export const executeTransaction = async (
       ],
     });
 
-    // Add all signatures from the service
-    const confirmationsArray = confirmations as Array<{
+    // Debug: Log confirmations before sorting
+    console.log("📋 Confirmations from service:", confirmations);
+    console.log("📊 Threshold required:", transaction.confirmationsRequired);
+    
+    // Sort confirmations by owner address (ascending) - CRITICAL for Safe signature validation
+    const confirmationsArray = (confirmations as Array<{
       owner: string;
       signature: string;
-    }>;
+    }>).sort((a, b) => {
+      const addrA = a.owner.toLowerCase();
+      const addrB = b.owner.toLowerCase();
+      return addrA < addrB ? -1 : addrA > addrB ? 1 : 0;
+    });
+
+    // Debug: Log sorted confirmations
+    console.log("🔀 Sorted confirmations:", confirmationsArray.map(c => ({
+      owner: c.owner,
+      signatureLength: c.signature.length
+    })));
+
+    // Add sorted signatures to the transaction
     confirmationsArray.forEach((confirmation) => {
       safeTransaction.addSignature({
         signer: confirmation.owner,
@@ -250,6 +267,11 @@ export const executeTransaction = async (
         dynamicPart: () => confirmation.signature.slice(130),
       });
     });
+
+    // Debug: Log final encoded signatures
+    const encodedSigs = safeTransaction.encodedSignatures();
+    console.log("🔐 Encoded signatures:", encodedSigs);
+    console.log("🔐 Encoded signatures length:", encodedSigs.length);
 
     // Execute the transaction
     const executeTxResponse = await safe.executeTransaction(safeTransaction);

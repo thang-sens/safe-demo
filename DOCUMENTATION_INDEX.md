@@ -54,6 +54,7 @@
 | **[CCIP_INTEGRATION_COMPLETE.md](CCIP_INTEGRATION_COMPLETE.md)** | Integration completion summary | Everyone |
 | **[CCIP_MIGRATION_GUIDE.md](CCIP_MIGRATION_GUIDE.md)** | Migration from old projects | Ops/DevOps |
 | **[CCIP_TESTING_CHECKLIST.md](CCIP_TESTING_CHECKLIST.md)** | Testing procedures | QA/Testers |
+| **[CCIP_TROUBLESHOOTING.md](CCIP_TROUBLESHOOTING.md)** | Error solutions (GS013, etc.) | Everyone |
 | **[CCIP_QUICK_START.md](CCIP_QUICK_START.md)** | Quick start guide | Everyone |
 | **[CCIP_INTEGRATION_GUIDE.md](CCIP_INTEGRATION_GUIDE.md)** | Comprehensive guide | Developers |
 | **[CCIP_INTEGRATION_COMPLETE.md](CCIP_INTEGRATION_COMPLETE.md)** | Implementation summary | Tech leads |
