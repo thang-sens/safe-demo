@@ -1,6 +1,7 @@
 import express from "express";
 import Company from "../models/Company.js";
 import { deploySafe } from "../services/safeService.js";
+import { isValidObjectId } from "mongoose";
 
 const router = express.Router();
 
@@ -11,12 +12,10 @@ router.post("/", async (req, res) => {
 
     // Validation
     if (!name || !owners || !threshold) {
-      return res
-        .status(400)
-        .json({
-          error:
-            "Missing required fields: name, owners, and threshold are required",
-        });
+      return res.status(400).json({
+        error:
+          "Missing required fields: name, owners, and threshold are required",
+      });
     }
 
     if (!Array.isArray(owners) || owners.length === 0) {
@@ -104,8 +103,14 @@ router.get("/by-name/:name", async (req, res) => {
 
 // GET /api/companies/:id/safe - Get Safe info for a company
 router.get("/:id/safe", async (req, res) => {
+  const id = req.params.id;
   try {
-    const company = await Company.findById(req.params.id);
+    let company;
+    if (!isValidObjectId(id)) {
+      company = await Company.findOne({ name: id });
+    } else {
+      company = await Company.findById(req.params.id);
+    }
 
     if (!company) {
       return res.status(404).json({ error: "Company not found" });
