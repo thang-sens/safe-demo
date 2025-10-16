@@ -24,7 +24,12 @@ export interface NetworkConfig {
   };
 }
 
-export type NetworkName = "ethereum-sepolia" | "arbitrum-sepolia" | "avalanche-fuji" | "polygon-amoy";
+export type NetworkName =
+  | "ethereum-sepolia"
+  | "arbitrum-sepolia"
+  | "avalanche-fuji"
+  | "polygon-amoy"
+  | "base-sepolia";
 
 /**
  * CCIP Network Configurations
@@ -37,7 +42,9 @@ export const CCIP_NETWORKS: Record<NetworkName, NetworkConfig> = {
     name: "Ethereum Sepolia",
     chainSelector: "16015286601757825753", // Sepolia chain selector
     routerAddress: "0x0BF3dE8c5D3e8A2B34D2BEeB17ABfCeBaf363A59", // CCIP Router on Sepolia
-    rpcUrl: import.meta.env.VITE_INFURA_RPC_URL || "https://sepolia.infura.io/v3/YOUR_INFURA_KEY",
+    rpcUrl:
+      import.meta.env.VITE_INFURA_RPC_URL ||
+      "https://sepolia.infura.io/v3/YOUR_INFURA_KEY",
     nativeCurrency: {
       name: "Sepolia Ether",
       symbol: "ETH",
@@ -136,6 +143,32 @@ export const CCIP_NETWORKS: Record<NetworkName, NetworkConfig> = {
       },
     ],
   },
+  "base-sepolia": {
+    chainId: 84532,
+    name: "Base Sepolia",
+    chainSelector: "10344971235874465080", // Base Sepolia chain selector
+    routerAddress: "0xD3b06cEbF099CE7DA4AcCf578aaebFDBd6e88a93", // CCIP Router on Base Sepolia
+    rpcUrl: "https://sepolia.base.org",
+    nativeCurrency: {
+      name: "Ether",
+      symbol: "ETH",
+      decimals: 18,
+    },
+    supportedTokens: [
+      {
+        name: "Chainlink Token",
+        symbol: "LINK",
+        address: "0xE4aB69C077896252FAFBD49EFD26B5D171A32410", // LINK on Base Sepolia
+        decimals: 18,
+      },
+      {
+        name: "USD Coin",
+        symbol: "USDC",
+        address: "0x036CbD53842c5426634e7929541eC2318f3dCF7e", // USDC on Base Sepolia
+        decimals: 6,
+      },
+    ],
+  },
 };
 
 /**
@@ -152,14 +185,20 @@ export const getNetworkConfig = (networkName: NetworkName): NetworkConfig => {
 /**
  * Get network configuration by chain ID
  */
-export const getNetworkConfigByChainId = (chainId: number): NetworkConfig | undefined => {
-  return Object.values(CCIP_NETWORKS).find((config) => config.chainId === chainId);
+export const getNetworkConfigByChainId = (
+  chainId: number
+): NetworkConfig | undefined => {
+  return Object.values(CCIP_NETWORKS).find(
+    (config) => config.chainId === chainId
+  );
 };
 
 /**
  * Get all available destination networks (excluding the current network)
  */
-export const getAvailableDestinationNetworks = (currentNetworkName: NetworkName): NetworkConfig[] => {
+export const getAvailableDestinationNetworks = (
+  currentNetworkName: NetworkName
+): NetworkConfig[] => {
   return Object.entries(CCIP_NETWORKS)
     .filter(([name]) => name !== currentNetworkName)
     .map(([, config]) => config);
@@ -181,7 +220,9 @@ export const getTokenBySymbol = (
   symbol: string
 ): TokenConfig | undefined => {
   const tokens = getSupportedTokens(networkName);
-  return tokens.find((token) => token.symbol.toLowerCase() === symbol.toLowerCase());
+  return tokens.find(
+    (token) => token.symbol.toLowerCase() === symbol.toLowerCase()
+  );
 };
 
 /**
@@ -193,9 +234,11 @@ export const isSupportedNetworkPair = (
 ): boolean => {
   // For now, all combinations are supported on testnet
   // In production, you might want to check specific lane support
-  return sourceNetwork !== destNetwork && 
-         CCIP_NETWORKS[sourceNetwork] !== undefined && 
-         CCIP_NETWORKS[destNetwork] !== undefined;
+  return (
+    sourceNetwork !== destNetwork &&
+    CCIP_NETWORKS[sourceNetwork] !== undefined &&
+    CCIP_NETWORKS[destNetwork] !== undefined
+  );
 };
 
 /**
