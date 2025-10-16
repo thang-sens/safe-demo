@@ -7,6 +7,8 @@ import {
   getPendingTransactions,
   getTransactionHistory,
   isOwner as isOwnerFlow,
+  rejectTransaction as rejectTxFlow,
+  executeRejectionTransaction as executeRejectionTxFlow,
 } from "./safeFlow";
 
 /**
@@ -102,7 +104,40 @@ export const getSafeThreshold = async (
  * Get chain ID from provider
  * @param provider - Ethers BrowserProvider
  */
-export const getChainId = async (provider: BrowserProvider): Promise<string> => {
+export const getChainId = async (
+  provider: BrowserProvider
+): Promise<string> => {
   const network = await provider.getNetwork();
   return network.chainId.toString();
+};
+
+/**
+ * Reject a pending transaction
+ * Creates a rejection transaction with the same nonce
+ * @param safeAddress - Address of the Safe wallet
+ * @param safeTxHash - Hash of the transaction to reject
+ * @param provider - Ethers BrowserProvider
+ * @returns Hash of the rejection transaction
+ */
+export const rejectTransaction = async (
+  safeAddress: string,
+  safeTxHash: string,
+  provider: BrowserProvider
+): Promise<string> => {
+  return await rejectTxFlow(safeAddress, safeTxHash, provider);
+};
+
+/**
+ * Execute a rejection transaction once threshold is reached
+ * @param safeAddress - Address of the Safe wallet
+ * @param rejectionTxHash - Hash of the rejection transaction
+ * @param provider - Ethers BrowserProvider
+ * @returns Transaction hash
+ */
+export const executeRejectionTransaction = async (
+  safeAddress: string,
+  rejectionTxHash: string,
+  provider: BrowserProvider
+): Promise<string> => {
+  return await executeRejectionTxFlow(safeAddress, rejectionTxHash, provider);
 };

@@ -5,7 +5,12 @@ import Safe from "@safe-global/protocol-kit";
 import SafeApiKit from "@safe-global/api-kit";
 import { ethers, BrowserProvider } from "ethers";
 import type { MetaTransactionData } from "@safe-global/types-kit";
-import { createPublicClient, http , encodeAbiParameters, parseAbiParameters } from "viem";
+import {
+  createPublicClient,
+  http,
+  encodeAbiParameters,
+  parseAbiParameters,
+} from "viem";
 import { getRawProvider } from "./web3auth";
 
 // Transaction data interface
@@ -240,22 +245,27 @@ export const executeTransaction = async (
     // Debug: Log confirmations before sorting
     console.log("📋 Confirmations from service:", confirmations);
     console.log("📊 Threshold required:", transaction.confirmationsRequired);
-    
+
     // Sort confirmations by owner address (ascending) - CRITICAL for Safe signature validation
-    const confirmationsArray = (confirmations as Array<{
-      owner: string;
-      signature: string;
-    }>).sort((a, b) => {
+    const confirmationsArray = (
+      confirmations as Array<{
+        owner: string;
+        signature: string;
+      }>
+    ).sort((a, b) => {
       const addrA = a.owner.toLowerCase();
       const addrB = b.owner.toLowerCase();
       return addrA < addrB ? -1 : addrA > addrB ? 1 : 0;
     });
 
     // Debug: Log sorted confirmations
-    console.log("🔀 Sorted confirmations:", confirmationsArray.map(c => ({
-      owner: c.owner,
-      signatureLength: c.signature.length
-    })));
+    console.log(
+      "🔀 Sorted confirmations:",
+      confirmationsArray.map((c) => ({
+        owner: c.owner,
+        signatureLength: c.signature.length,
+      }))
+    );
 
     // Add sorted signatures to the transaction
     confirmationsArray.forEach((confirmation) => {
@@ -287,6 +297,183 @@ export const executeTransaction = async (
     return receipt?.hash || executeTxResponse.hash || "";
   } catch (error) {
     console.error("Error executing transaction:", error);
+    throw error;
+  }
+};
+
+/**
+ * Reject a pending transaction by creating and executing a rejection transaction
+ * A rejection transaction has the same nonce but with 0 value and no data
+ * When executed, it invalidates the original transaction
+ * @param safeAddress - Address of the Safe wallet
+ * @param safeTxHash - Hash of the transaction to reject
+ * @param provider - Ethers BrowserProvider
+ * @returns Transaction hash of the rejection transaction
+ */
+export const rejectTransaction = async (
+  safeAddress: string,
+  safeTxHash: string,
+  provider: BrowserProvider
+): Promise<string> => {
+  try {
+    console.log("🚫 Rejecting transaction:", safeTxHash);
+
+    // Initialize Protocol Kit
+    const safe = await initProtocolKit(safeAddress, provider);
+
+    // Get chain ID
+    const network = await provider.getNetwork();
+    const chainId = network.chainId.toString();
+
+    // Initialize API Kit
+    const apiKit = await initApiKit(chainId);
+
+    // Get the original transaction to get its nonce
+    const originalTransaction = await apiKit.getTransaction(safeTxHash);
+    console.log("📋 Original transaction nonce:", originalTransaction.nonce);
+
+    // Get signer address
+    const signer = await provider.getSigner();
+    const signerAddress = await signer.getAddress();
+
+    // Create rejection transaction (0 value transfer to Safe itself with same nonce)
+    const rejectionTransaction = await safe.createTransaction({
+      transactions: [
+        {
+          to: safeAddress, // Send to itself
+          value: "0", // 0 value
+          data: "0x", // No data
+          operation: 0, // Call operation
+        },
+      ],
+      options: {
+        nonce: parseInt(originalTransaction.nonce.toString()), // CRITICAL: Use same nonce as original tx
+      },
+    });
+
+    // Sign the rejection transaction
+    const rejectionTxHash = await safe.getTransactionHash(rejectionTransaction);
+    const signature = await safe.signHash(rejectionTxHash);
+
+    console.log("✍️ Signed rejection transaction");
+
+    // Propose the rejection transaction to the service
+    await apiKit.proposeTransaction({
+      safeAddress,
+      safeTransactionData: rejectionTransaction.data,
+      safeTxHash: rejectionTxHash,
+      senderAddress: signerAddress,
+      senderSignature: signature.data,
+    });
+
+    console.log(
+      "📤 Rejection transaction proposed with hash:",
+      rejectionTxHash
+    );
+    console.log(
+      "⚠️ Note: Other owners need to confirm this rejection transaction"
+    );
+    console.log(
+      "⚠️ Once threshold is reached, execute it to reject the original tx"
+    );
+
+    return rejectionTxHash;
+  } catch (error) {
+    console.error("❌ Error rejecting transaction:", error);
+    throw error;
+  }
+};
+
+/**
+ * Execute a rejection transaction once threshold is reached
+ * This will invalidate the original transaction by using up its nonce
+ * @param safeAddress - Address of the Safe wallet
+ * @param rejectionTxHash - Hash of the rejection transaction
+ * @param provider - Ethers BrowserProvider
+ * @returns Transaction hash of the executed rejection
+ */
+export const executeRejectionTransaction = async (
+  safeAddress: string,
+  rejectionTxHash: string,
+  provider: BrowserProvider
+): Promise<string> => {
+  try {
+    console.log("🚫 Executing rejection transaction:", rejectionTxHash);
+
+    // Initialize Protocol Kit
+    const safe = await initProtocolKit(safeAddress, provider);
+
+    // Get chain ID
+    const network = await provider.getNetwork();
+    const chainId = network.chainId.toString();
+
+    // Initialize API Kit
+    const apiKit = await initApiKit(chainId);
+
+    // Get the rejection transaction from the service
+    const transaction = await apiKit.getTransaction(rejectionTxHash);
+
+    // Check if threshold is reached
+    const confirmations = transaction.confirmations || [];
+    if (confirmations.length < transaction.confirmationsRequired) {
+      throw new Error(
+        `Threshold not reached for rejection. ${confirmations.length}/${transaction.confirmationsRequired} confirmations`
+      );
+    }
+
+    // Create Safe transaction object
+    const safeTransaction = await safe.createTransaction({
+      transactions: [
+        {
+          to: transaction.to,
+          value: transaction.value,
+          data: transaction.data || "0x",
+          operation: transaction.operation,
+        },
+      ],
+      options: {
+        nonce: parseInt(transaction.nonce.toString()),
+      },
+    });
+
+    // Sort and add signatures
+    const confirmationsArray = (
+      confirmations as Array<{
+        owner: string;
+        signature: string;
+      }>
+    ).sort((a, b) => {
+      const addrA = a.owner.toLowerCase();
+      const addrB = b.owner.toLowerCase();
+      return addrA < addrB ? -1 : addrA > addrB ? 1 : 0;
+    });
+
+    confirmationsArray.forEach((confirmation) => {
+      safeTransaction.addSignature({
+        signer: confirmation.owner,
+        data: confirmation.signature,
+        isContractSignature: false,
+        staticPart: () => confirmation.signature.slice(0, 130),
+        dynamicPart: () => confirmation.signature.slice(130),
+      });
+    });
+
+    // Execute the rejection transaction
+    const executeTxResponse = await safe.executeTransaction(safeTransaction);
+    const txResponse = executeTxResponse.transactionResponse as unknown as {
+      wait: () => Promise<{ hash: string }>;
+    } | null;
+    const receipt = txResponse ? await txResponse.wait() : null;
+
+    console.log(
+      "✅ Rejection transaction executed successfully:",
+      receipt?.hash || executeTxResponse.hash
+    );
+    console.log("🚫 Original transaction has been invalidated");
+
+    return receipt?.hash || executeTxResponse.hash || "";
+  } catch (error) {
+    console.error("❌ Error executing rejection transaction:", error);
     throw error;
   }
 };
@@ -532,20 +719,12 @@ export const changeThreshold = async (
  * ============================================================================
  */
 
-import type {
-  NetworkName,
-} from "./ccipConfig";
+import type { NetworkName } from "./ccipConfig";
 
-import {
-  getNetworkConfig,
-  getTokenBySymbol,
-} from "./ccipConfig";
+import { getNetworkConfig, getTokenBySymbol } from "./ccipConfig";
 
 // Import CCIP SDK and ethers adapters
-import {
-  createClient,
-  IERC20ABI,
-} from "@chainlink/ccip-js";
+import { createClient, IERC20ABI } from "@chainlink/ccip-js";
 
 /**
  * Interface for CCIP transfer parameters
@@ -605,7 +784,9 @@ export const calculateCCIPFee = async (
     const token = getTokenBySymbol(params.sourceNetwork, params.tokenSymbol);
 
     if (!token) {
-      throw new Error(`Token ${params.tokenSymbol} not found on ${params.sourceNetwork}`);
+      throw new Error(
+        `Token ${params.tokenSymbol} not found on ${params.sourceNetwork}`
+      );
     }
 
     // Get viem chain config
@@ -613,14 +794,14 @@ export const calculateCCIPFee = async (
 
     // Convert ethers provider to viem public client using the adapter
     const rpcUrl = sourceConfig.rpcUrl;
-    
+
     // Create a viem public client manually
-  
+
     const publicClient = createPublicClient({
       chain: sourceChain,
       transport: http(rpcUrl),
     });
-    
+
     // Create CCIP client
     const ccipClient = createClient();
 
@@ -652,14 +833,19 @@ export const buildCCIPSafeTransaction = async (
   params: CCIPTransferParams,
   safeAddress: string,
   provider: BrowserProvider
-): Promise<{ transactions: MetaTransactionData[]; estimatedFee: CCIPFeeEstimate }> => {
+): Promise<{
+  transactions: MetaTransactionData[];
+  estimatedFee: CCIPFeeEstimate;
+}> => {
   try {
     const sourceConfig = getNetworkConfig(params.sourceNetwork);
     const destConfig = getNetworkConfig(params.destinationNetwork);
     const token = getTokenBySymbol(params.sourceNetwork, params.tokenSymbol);
 
     if (!token) {
-      throw new Error(`Token ${params.tokenSymbol} not found on ${params.sourceNetwork}`);
+      throw new Error(
+        `Token ${params.tokenSymbol} not found on ${params.sourceNetwork}`
+      );
     }
 
     // Calculate fee first
@@ -674,7 +860,7 @@ export const buildCCIPSafeTransaction = async (
       chain: sourceChain,
       transport: http(sourceConfig.rpcUrl),
     });
-    
+
     const ccipClient = createClient();
 
     // Step 1: Check if token approval is needed using CCIP SDK
@@ -696,10 +882,10 @@ export const buildCCIPSafeTransaction = async (
         provider
       );
 
-      const approvalData = tokenContract.interface.encodeFunctionData("approve", [
-        sourceConfig.routerAddress,
-        amountBN,
-      ]);
+      const approvalData = tokenContract.interface.encodeFunctionData(
+        "approve",
+        [sourceConfig.routerAddress, amountBN]
+      );
 
       transactions.push({
         to: token.address,
@@ -712,12 +898,11 @@ export const buildCCIPSafeTransaction = async (
     // Step 2: Build CCIP send transaction using SDK
     // We need to manually encode the ccipSend call since we're not directly calling it
     // but proposing it through Safe
-    
+
     // Encode receiver address as bytes
-    const receiverBytes = encodeAbiParameters(
-      parseAbiParameters("address"),
-      [params.recipientAddress as `0x${string}`]
-    );
+    const receiverBytes = encodeAbiParameters(parseAbiParameters("address"), [
+      params.recipientAddress as `0x${string}`,
+    ]);
 
     // Build CCIP message structure
     const ccipMessage = {
@@ -735,14 +920,17 @@ export const buildCCIPSafeTransaction = async (
 
     // Encode ccipSend function call
     const ccipSendData = encodeAbiParameters(
-      parseAbiParameters("uint64 destinationChainSelector, (bytes receiver, bytes data, (address token, uint256 amount)[] tokenAmounts, address feeToken, bytes extraArgs) message"),
+      parseAbiParameters(
+        "uint64 destinationChainSelector, (bytes receiver, bytes data, (address token, uint256 amount)[] tokenAmounts, address feeToken, bytes extraArgs) message"
+      ),
       [BigInt(destConfig.chainSelector), ccipMessage]
     );
 
     // Create the full function call with selector
     // ccipSend function selector is 0x96f4e9f9
     const functionSelector = "0x96f4e9f9";
-    const fullCallData = (functionSelector + ccipSendData.slice(2)) as `0x${string}`;
+    const fullCallData = (functionSelector +
+      ccipSendData.slice(2)) as `0x${string}`;
 
     // Add CCIP send transaction (with fee as value)
     transactions.push({
@@ -831,11 +1019,16 @@ export const checkCCIPTransferBalance = async (
   params: CCIPTransferParams,
   safeAddress: string,
   provider: BrowserProvider
-): Promise<{ hasTokenBalance: boolean; hasFeeBalance: boolean; tokenBalance: string; nativeBalance: string }> => {
+): Promise<{
+  hasTokenBalance: boolean;
+  hasFeeBalance: boolean;
+  tokenBalance: string;
+  nativeBalance: string;
+}> => {
   try {
     const sourceConfig = getNetworkConfig(params.sourceNetwork);
     const token = getTokenBySymbol(params.sourceNetwork, params.tokenSymbol);
-    
+
     if (!token) {
       throw new Error(`Token ${params.tokenSymbol} not found`);
     }
@@ -848,13 +1041,13 @@ export const checkCCIPTransferBalance = async (
     });
 
     // Check token balance using viem
-    const tokenBalance = await publicClient.readContract({
+    const tokenBalance = (await publicClient.readContract({
       address: token.address as `0x${string}`,
       abi: IERC20ABI as any,
       functionName: "balanceOf",
       args: [safeAddress as `0x${string}`],
-    }) as bigint;
-    
+    })) as bigint;
+
     const hasTokenBalance = tokenBalance >= BigInt(params.amount);
 
     // Check native balance for fees
@@ -890,10 +1083,13 @@ export const getCCIPMessageId = async (
 
     // CCIP Router emits CCIPSendRequested event with messageId
     // Event signature: CCIPSendRequested(bytes32 indexed messageId, ...)
-    const ccipEventTopic = "0x8832dc5c91b7173c8eb69ccee5d24c4d4ff537b6a89b0e58b17e8b6f3f847e06";
-    
-    const ccipLog = receipt.logs.find(log => log.topics[0] === ccipEventTopic);
-    
+    const ccipEventTopic =
+      "0x8832dc5c91b7173c8eb69ccee5d24c4d4ff537b6a89b0e58b17e8b6f3f847e06";
+
+    const ccipLog = receipt.logs.find(
+      (log) => log.topics[0] === ccipEventTopic
+    );
+
     if (ccipLog && ccipLog.topics[1]) {
       return ccipLog.topics[1]; // messageId is the first indexed parameter
     }
@@ -920,7 +1116,7 @@ export const checkCCIPTransferStatus = async (
   try {
     // CCIP Explorer URL
     const explorerUrl = `https://ccip.chain.link/msg/${messageId}`;
-    
+
     // For now, return the explorer URL for manual checking
     // In production, you could call CCIP Explorer API or check on-chain state
     return {

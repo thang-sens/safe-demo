@@ -9,6 +9,7 @@ import {
   addOwner,
   removeOwner,
   changeThreshold,
+  rejectTransaction,
 } from "../lib/safeFlow";
 import type { TransactionData, SafeTransaction } from "../lib/safeFlow";
 import { getSafeInfo, getChainId } from "../lib/safe";
@@ -39,7 +40,9 @@ export default function SafeTransactions({
   const [safeInfo, setSafeInfo] = useState<SafeInfo | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string>("");
-  const [activeTab, setActiveTab] = useState<"transactions" | "ccip" | "owners">("transactions");
+  const [activeTab, setActiveTab] = useState<
+    "transactions" | "ccip" | "owners"
+  >("transactions");
 
   // Form states
   const [txForm, setTxForm] = useState<TransactionData>({
@@ -154,10 +157,10 @@ export default function SafeTransactions({
         provider
       );
       alert(`Transaction executed successfully!\nTX Hash: ${txHash}`);
-      
+
       // Reload Safe data to get updated owners/threshold
       await loadSafeData();
-      
+
       // Sync backend with updated data
       // Wait a bit for blockchain state to be fully updated
       setTimeout(async () => {
@@ -168,6 +171,43 @@ export default function SafeTransactions({
         err instanceof Error ? err.message : "Failed to execute transaction";
       setError(errorMessage);
       console.error("Error executing transaction:", err);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  // Reject a transaction
+  const handleRejectTransaction = async (safeTxHash: string) => {
+    if (
+      !confirm(
+        "Are you sure you want to reject this transaction? This will create a rejection transaction that needs to be confirmed by other owners."
+      )
+    ) {
+      return;
+    }
+
+    try {
+      setLoading(true);
+      setError("");
+
+      const rejectionTxHash = await rejectTransaction(
+        safeAddress,
+        safeTxHash,
+        provider
+      );
+      alert(
+        `Rejection transaction created successfully!\n\n` +
+          `Rejection TX Hash: ${rejectionTxHash}\n\n` +
+          `⚠️ This rejection transaction needs to be confirmed by other owners.\n` +
+          `Once threshold is reached, execute it to reject the original transaction.`
+      );
+
+      await loadSafeData();
+    } catch (err) {
+      const errorMessage =
+        err instanceof Error ? err.message : "Failed to reject transaction";
+      setError(errorMessage);
+      console.error("Error rejecting transaction:", err);
     } finally {
       setLoading(false);
     }
@@ -278,11 +318,24 @@ export default function SafeTransactions({
       {/* Tab Navigation */}
       <div className="tabs">
         <button
-          className={activeTab === "transactions" ? "tab-button active" : "tab-button"}
+          className={
+            activeTab === "transactions" ? "tab-button active" : "tab-button"
+          }
           onClick={() => setActiveTab("transactions")}
         >
-          <svg width="20" height="20" viewBox="0 0 20 20" fill="none" style={{ marginRight: '6px' }}>
-            <path d="M3 8L10 3L17 8M4 9V16C4 16.5523 4.44772 17 5 17H15C15.5523 17 16 16.5523 16 16V9" stroke="currentColor" strokeWidth="2" strokeLinecap="round"/>
+          <svg
+            width="20"
+            height="20"
+            viewBox="0 0 20 20"
+            fill="none"
+            style={{ marginRight: "6px" }}
+          >
+            <path
+              d="M3 8L10 3L17 8M4 9V16C4 16.5523 4.44772 17 5 17H15C15.5523 17 16 16.5523 16 16V9"
+              stroke="currentColor"
+              strokeWidth="2"
+              strokeLinecap="round"
+            />
           </svg>
           Transactions
         </button>
@@ -290,18 +343,45 @@ export default function SafeTransactions({
           className={activeTab === "ccip" ? "tab-button active" : "tab-button"}
           onClick={() => setActiveTab("ccip")}
         >
-          <svg width="20" height="20" viewBox="0 0 20 20" fill="none" style={{ marginRight: '6px' }}>
-            <path d="M14 6L18 10M18 10L14 14M18 10H2" stroke="currentColor" strokeWidth="2" strokeLinecap="round"/>
+          <svg
+            width="20"
+            height="20"
+            viewBox="0 0 20 20"
+            fill="none"
+            style={{ marginRight: "6px" }}
+          >
+            <path
+              d="M14 6L18 10M18 10L14 14M18 10H2"
+              stroke="currentColor"
+              strokeWidth="2"
+              strokeLinecap="round"
+            />
           </svg>
           Cross-Chain Transfer
         </button>
         <button
-          className={activeTab === "owners" ? "tab-button active" : "tab-button"}
+          className={
+            activeTab === "owners" ? "tab-button active" : "tab-button"
+          }
           onClick={() => setActiveTab("owners")}
         >
-          <svg width="20" height="20" viewBox="0 0 20 20" fill="none" style={{ marginRight: '6px' }}>
-            <path d="M13 7C13 8.65685 11.6569 10 10 10C8.34315 10 7 8.65685 7 7C7 5.34315 8.34315 4 10 4C11.6569 4 13 5.34315 13 7Z" stroke="currentColor" strokeWidth="2"/>
-            <path d="M5 16C5 13.7909 6.79086 12 9 12H11C13.2091 12 15 13.7909 15 16V17H5V16Z" stroke="currentColor" strokeWidth="2"/>
+          <svg
+            width="20"
+            height="20"
+            viewBox="0 0 20 20"
+            fill="none"
+            style={{ marginRight: "6px" }}
+          >
+            <path
+              d="M13 7C13 8.65685 11.6569 10 10 10C8.34315 10 7 8.65685 7 7C7 5.34315 8.34315 4 10 4C11.6569 4 13 5.34315 13 7Z"
+              stroke="currentColor"
+              strokeWidth="2"
+            />
+            <path
+              d="M5 16C5 13.7909 6.79086 12 9 12H11C13.2091 12 15 13.7909 15 16V17H5V16Z"
+              stroke="currentColor"
+              strokeWidth="2"
+            />
           </svg>
           Owner Management
         </button>
@@ -344,137 +424,155 @@ export default function SafeTransactions({
         <>
           {/* Propose Transaction Form */}
           <div className="propose-transaction">
-        <h3>Propose New Transaction</h3>
-        <form onSubmit={handleProposeTransaction}>
-          <div>
-            <label>To Address:</label>
-            <input
-              type="text"
-              value={txForm.to}
-              onChange={(e) => setTxForm({ ...txForm, to: e.target.value })}
-              placeholder="0x..."
-              required
-            />
-          </div>
-          <div>
-            <label>Value (in wei):</label>
-            <input
-              type="text"
-              value={txForm.value}
-              onChange={(e) => setTxForm({ ...txForm, value: e.target.value })}
-              placeholder="0"
-              required
-            />
-          </div>
-          <div>
-            <label>Data (hex):</label>
-            <input
-              type="text"
-              value={txForm.data}
-              onChange={(e) => setTxForm({ ...txForm, data: e.target.value })}
-              placeholder="0x"
-              required
-            />
-          </div>
-          <div>
-            <label>Operation:</label>
-            <select
-              value={txForm.operation}
-              onChange={(e) =>
-                setTxForm({
-                  ...txForm,
-                  operation: Number(e.target.value) as 0 | 1,
-                })
-              }
-            >
-              <option value={0}>Call</option>
-              <option value={1}>DelegateCall</option>
-            </select>
-          </div>
-          <button type="submit" disabled={loading}>
-            Propose Transaction
-          </button>
-        </form>
-      </div>
-
-      {/* Pending Transactions */}
-      <div className="pending-transactions">
-        <h3>Pending Transactions ({pendingTxs.length})</h3>
-        {pendingTxs.length === 0 ? (
-          <p>No pending transactions</p>
-        ) : (
-          <div className="transactions-list">
-            {pendingTxs.map((tx) => (
-              <div key={tx.safeTxHash} className="transaction-card">
-                <p>
-                  <strong>Safe TX Hash:</strong>{" "}
-                  {tx.safeTxHash.substring(0, 20)}...
-                </p>
-                <p>
-                  <strong>To:</strong> {tx.to}
-                </p>
-                <p>
-                  <strong>Value:</strong> {tx.value} wei
-                </p>
-                <p>
-                  <strong>Confirmations:</strong> {tx.confirmations.length} /{" "}
-                  {tx.confirmationsRequired}
-                </p>
-                <div className="transaction-actions">
-                  {!hasUserConfirmed(tx) && (
-                    <button
-                      onClick={() => handleConfirmTransaction(tx.safeTxHash)}
-                      disabled={loading}
-                    >
-                      Confirm
-                    </button>
-                  )}
-                  {tx.confirmations.length >= tx.confirmationsRequired && (
-                    <button
-                      onClick={() => handleExecuteTransaction(tx.safeTxHash)}
-                      disabled={loading}
-                    >
-                      Execute
-                    </button>
-                  )}
-                  {hasUserConfirmed(tx) && (
-                    <span className="confirmed-badge">✓ You confirmed</span>
-                  )}
-                </div>
+            <h3>Propose New Transaction</h3>
+            <form onSubmit={handleProposeTransaction}>
+              <div>
+                <label>To Address:</label>
+                <input
+                  type="text"
+                  value={txForm.to}
+                  onChange={(e) => setTxForm({ ...txForm, to: e.target.value })}
+                  placeholder="0x..."
+                  required
+                />
               </div>
-            ))}
-          </div>
-        )}
-      </div>
-
-      {/* Transaction History */}
-      <div className="transaction-history">
-        <h3>Transaction History ({history.length})</h3>
-        {history.length === 0 ? (
-          <p>No transaction history</p>
-        ) : (
-          <div className="transactions-list">
-            {history.slice(0, 10).map((tx) => (
-              <div key={tx.safeTxHash} className="transaction-card">
-                <p>
-                  <strong>Safe TX Hash:</strong>{" "}
-                  {tx.safeTxHash.substring(0, 20)}...
-                </p>
-                <p>
-                  <strong>To:</strong> {tx.to}
-                </p>
-                <p>
-                  <strong>Value:</strong> {tx.value} wei
-                </p>
-                <p>
-                  <strong>Status:</strong>{" "}
-                  {tx.isExecuted ? "✓ Executed" : "Pending"}
-                </p>
+              <div>
+                <label>Value (in wei):</label>
+                <input
+                  type="text"
+                  value={txForm.value}
+                  onChange={(e) =>
+                    setTxForm({ ...txForm, value: e.target.value })
+                  }
+                  placeholder="0"
+                  required
+                />
               </div>
-            ))}
+              <div>
+                <label>Data (hex):</label>
+                <input
+                  type="text"
+                  value={txForm.data}
+                  onChange={(e) =>
+                    setTxForm({ ...txForm, data: e.target.value })
+                  }
+                  placeholder="0x"
+                  required
+                />
+              </div>
+              <div>
+                <label>Operation:</label>
+                <select
+                  value={txForm.operation}
+                  onChange={(e) =>
+                    setTxForm({
+                      ...txForm,
+                      operation: Number(e.target.value) as 0 | 1,
+                    })
+                  }
+                >
+                  <option value={0}>Call</option>
+                  <option value={1}>DelegateCall</option>
+                </select>
+              </div>
+              <button type="submit" disabled={loading}>
+                Propose Transaction
+              </button>
+            </form>
           </div>
-        )}
-      </div>
+
+          {/* Pending Transactions */}
+          <div className="pending-transactions">
+            <h3>Pending Transactions ({pendingTxs.length})</h3>
+            {pendingTxs.length === 0 ? (
+              <p>No pending transactions</p>
+            ) : (
+              <div className="transactions-list">
+                {pendingTxs.map((tx) => (
+                  <div key={tx.safeTxHash} className="transaction-card">
+                    <p>
+                      <strong>Safe TX Hash:</strong>{" "}
+                      {tx.safeTxHash.substring(0, 20)}...
+                    </p>
+                    <p>
+                      <strong>To:</strong> {tx.to}
+                    </p>
+                    <p>
+                      <strong>Value:</strong> {tx.value} wei
+                    </p>
+                    <p>
+                      <strong>Confirmations:</strong> {tx.confirmations.length}{" "}
+                      / {tx.confirmationsRequired}
+                    </p>
+                    <div className="transaction-actions">
+                      {!hasUserConfirmed(tx) && (
+                        <button
+                          onClick={() =>
+                            handleConfirmTransaction(tx.safeTxHash)
+                          }
+                          disabled={loading}
+                          className="btn-confirm"
+                        >
+                          Confirm
+                        </button>
+                      )}
+                      {tx.confirmations.length >= tx.confirmationsRequired && (
+                        <button
+                          onClick={() =>
+                            handleExecuteTransaction(tx.safeTxHash)
+                          }
+                          disabled={loading}
+                          className="btn-execute"
+                        >
+                          Execute
+                        </button>
+                      )}
+                      <button
+                        onClick={() => handleRejectTransaction(tx.safeTxHash)}
+                        disabled={loading}
+                        className="btn-reject"
+                        title="Reject this transaction"
+                      >
+                        Reject
+                      </button>
+                      {hasUserConfirmed(tx) && (
+                        <span className="confirmed-badge">✓ You confirmed</span>
+                      )}
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+
+          {/* Transaction History */}
+          <div className="transaction-history">
+            <h3>Transaction History ({history.length})</h3>
+            {history.length === 0 ? (
+              <p>No transaction history</p>
+            ) : (
+              <div className="transactions-list">
+                {history.slice(0, 10).map((tx) => (
+                  <div key={tx.safeTxHash} className="transaction-card">
+                    <p>
+                      <strong>Safe TX Hash:</strong>{" "}
+                      {tx.safeTxHash.substring(0, 20)}...
+                    </p>
+                    <p>
+                      <strong>To:</strong> {tx.to}
+                    </p>
+                    <p>
+                      <strong>Value:</strong> {tx.value} wei
+                    </p>
+                    <p>
+                      <strong>Status:</strong>{" "}
+                      {tx.isExecuted ? "✓ Executed" : "Pending"}
+                    </p>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
         </>
       )}
 
@@ -490,91 +588,91 @@ export default function SafeTransactions({
 
       {/* Owner Management Tab Content */}
       {activeTab === "owners" && (
-      <div className="owner-management">
-        <h3>Owner Management</h3>
+        <div className="owner-management">
+          <h3>Owner Management</h3>
 
-        {/* Add Owner */}
-        <form onSubmit={handleAddOwner}>
-          <h4>Add Owner</h4>
-          <div>
-            <label>New Owner Address:</label>
-            <input
-              type="text"
-              value={newOwner}
-              onChange={(e) => setNewOwner(e.target.value)}
-              placeholder="0x..."
-              required
-            />
-          </div>
-          <div>
-            <label>New Threshold:</label>
-            <input
-              type="number"
-              value={newThreshold}
-              onChange={(e) => setNewThreshold(Number(e.target.value))}
-              min={1}
-              max={(safeInfo?.owners.length ?? 0) + 1}
-              required
-            />
-          </div>
-          <button type="submit" disabled={loading}>
-            Propose Add Owner
-          </button>
-        </form>
+          {/* Add Owner */}
+          <form onSubmit={handleAddOwner}>
+            <h4>Add Owner</h4>
+            <div>
+              <label>New Owner Address:</label>
+              <input
+                type="text"
+                value={newOwner}
+                onChange={(e) => setNewOwner(e.target.value)}
+                placeholder="0x..."
+                required
+              />
+            </div>
+            <div>
+              <label>New Threshold:</label>
+              <input
+                type="number"
+                value={newThreshold}
+                onChange={(e) => setNewThreshold(Number(e.target.value))}
+                min={1}
+                max={(safeInfo?.owners.length ?? 0) + 1}
+                required
+              />
+            </div>
+            <button type="submit" disabled={loading}>
+              Propose Add Owner
+            </button>
+          </form>
 
-        {/* Remove Owner */}
-        <form onSubmit={handleRemoveOwner}>
-          <h4>Remove Owner</h4>
-          <div>
-            <label>Owner to Remove:</label>
-            <select
-              value={ownerToRemove}
-              onChange={(e) => setOwnerToRemove(e.target.value)}
-              required
-            >
-              <option value="">Select owner...</option>
-              {safeInfo?.owners.map((owner: string) => (
-                <option key={owner} value={owner}>
-                  {owner}
-                </option>
-              ))}
-            </select>
-          </div>
-          <div>
-            <label>New Threshold:</label>
-            <input
-              type="number"
-              value={newThreshold}
-              onChange={(e) => setNewThreshold(Number(e.target.value))}
-              min={1}
-              max={Math.max((safeInfo?.owners.length ?? 1) - 1, 1)}
-              required
-            />
-          </div>
-          <button type="submit" disabled={loading}>
-            Propose Remove Owner
-          </button>
-        </form>
+          {/* Remove Owner */}
+          <form onSubmit={handleRemoveOwner}>
+            <h4>Remove Owner</h4>
+            <div>
+              <label>Owner to Remove:</label>
+              <select
+                value={ownerToRemove}
+                onChange={(e) => setOwnerToRemove(e.target.value)}
+                required
+              >
+                <option value="">Select owner...</option>
+                {safeInfo?.owners.map((owner: string) => (
+                  <option key={owner} value={owner}>
+                    {owner}
+                  </option>
+                ))}
+              </select>
+            </div>
+            <div>
+              <label>New Threshold:</label>
+              <input
+                type="number"
+                value={newThreshold}
+                onChange={(e) => setNewThreshold(Number(e.target.value))}
+                min={1}
+                max={Math.max((safeInfo?.owners.length ?? 1) - 1, 1)}
+                required
+              />
+            </div>
+            <button type="submit" disabled={loading}>
+              Propose Remove Owner
+            </button>
+          </form>
 
-        {/* Change Threshold */}
-        <form onSubmit={handleChangeThreshold}>
-          <h4>Change Threshold</h4>
-          <div>
-            <label>New Threshold:</label>
-            <input
-              type="number"
-              value={newThreshold}
-              onChange={(e) => setNewThreshold(Number(e.target.value))}
-              min={1}
-              max={safeInfo?.owners.length || 1}
-              required
-            />
-          </div>
-          <button type="submit" disabled={loading}>
-            Propose Change Threshold
-          </button>
-        </form>
-      </div>
+          {/* Change Threshold */}
+          <form onSubmit={handleChangeThreshold}>
+            <h4>Change Threshold</h4>
+            <div>
+              <label>New Threshold:</label>
+              <input
+                type="number"
+                value={newThreshold}
+                onChange={(e) => setNewThreshold(Number(e.target.value))}
+                min={1}
+                max={safeInfo?.owners.length || 1}
+                required
+              />
+            </div>
+            <button type="submit" disabled={loading}>
+              Propose Change Threshold
+            </button>
+          </form>
+        </div>
       )}
 
       <style>{`
@@ -717,6 +815,30 @@ export default function SafeTransactions({
           gap: 10px;
           margin-top: 10px;
           align-items: center;
+        }
+
+        .btn-confirm {
+          background: #28a745;
+        }
+
+        .btn-confirm:hover:not(:disabled) {
+          background: #218838;
+        }
+
+        .btn-execute {
+          background: #007bff;
+        }
+
+        .btn-execute:hover:not(:disabled) {
+          background: #0056b3;
+        }
+
+        .btn-reject {
+          background: #dc3545;
+        }
+
+        .btn-reject:hover:not(:disabled) {
+          background: #c82333;
         }
 
         .confirmed-badge {
