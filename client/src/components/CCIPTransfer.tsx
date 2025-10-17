@@ -55,6 +55,14 @@ export default function CCIPTransfer({
     recipientAddress: "",
   });
 
+  // Track last proposed transfer for re-proposal after approval
+  const [lastProposedTransfer, setLastProposedTransfer] = useState<{
+    destinationNetwork: NetworkName;
+    tokenSymbol: string;
+    amount: string;
+    recipientAddress: string;
+  } | null>(null);
+
   const sourceNetwork = DEFAULT_SOURCE_NETWORK;
   const destinationNetworks = getAvailableDestinationNetworks(sourceNetwork);
   const supportedTokens = getSupportedTokens(sourceNetwork);
@@ -64,7 +72,8 @@ export default function CCIPTransfer({
     setFormData({
       ...formData,
       destinationNetwork: network as NetworkName,
-      tokenSymbol: "", // Reset token selection
+      tokenSymbol: "",
+      recipientAddress: formData.recipientAddress,
     });
     setFeeEstimate(null);
     setBalanceCheck(null);
@@ -78,6 +87,20 @@ export default function CCIPTransfer({
     });
     setFeeEstimate(null);
     setBalanceCheck(null);
+  };
+
+  // Restore last proposed transfer (helper for re-proposal after approval)
+  const handleRestoreLastTransfer = () => {
+    if (lastProposedTransfer) {
+      setFormData({
+        destinationNetwork: lastProposedTransfer.destinationNetwork,
+        tokenSymbol: lastProposedTransfer.tokenSymbol,
+        amount: lastProposedTransfer.amount,
+        recipientAddress: lastProposedTransfer.recipientAddress,
+      });
+      setSuccess("");
+      setError("");
+    }
   };
 
   // Calculate fee
@@ -198,37 +221,60 @@ export default function CCIPTransfer({
       const result = await proposeCCIPTransfer(params, safeAddress, provider);
 
       if (result.needsApproval) {
+        // Save the transfer details for re-proposal
+        setLastProposedTransfer({
+          destinationNetwork: formData.destinationNetwork as NetworkName,
+          tokenSymbol: formData.tokenSymbol,
+          amount: formData.amount,
+          recipientAddress: formData.recipientAddress,
+        });
+
         // Approval transaction was proposed
         setSuccess(
-          `⚠️ Token approval needed! Approval transaction proposed: ${result.approvalTxHash!.substring(
-            0,
-            10
-          )}...\n\n` +
-            `Please:\n` +
-            `1. Find the approval transaction in "Pending Transactions"\n` +
-            `2. Confirm it with other owners if needed\n` +
-            `3. Execute the approval transaction\n` +
-            `4. Then come back and propose the CCIP transfer again`
+          `📝 STEP 1/2: Token Approval Transaction Proposed\n\n` +
+            `Approval Tx Hash: ${result.approvalTxHash!.substring(
+              0,
+              20
+            )}...\n\n` +
+            `⚠️ IMPORTANT - This is ONLY the approval, NOT the transfer!\n\n` +
+            `Next Steps:\n` +
+            `1. Go to "Pending Transactions" tab\n` +
+            `2. Find the approval transaction (to: LINK Token)\n` +
+            `3. Confirm with other owners (if needed)\n` +
+            `4. Execute the approval transaction\n` +
+            `5. ⭐ COME BACK HERE and click "Propose Transfer" AGAIN ⭐\n` +
+            `6. The second time will propose the actual CCIP transfer\n\n` +
+            `Why 2 steps? Safe cannot batch approval + transfer due to technical limitations.\n\n` +
+            `💡 TIP: Form is still filled - just click "Propose Transfer" again after executing approval!`
         );
+
+        // Don't reset form - keep it filled for re-proposal!
+        // User can just click "Propose Transfer" again
       } else {
         // CCIP transfer was proposed directly (no approval needed)
         setSuccess(
-          `✅ CCIP transfer proposed successfully! Transaction hash: ${result.safeTxHash.substring(
-            0,
-            10
-          )}...`
+          `✅ STEP 2/2: CCIP Transfer Transaction Proposed!\n\n` +
+            `Transfer Tx Hash: ${result.safeTxHash.substring(0, 20)}...\n\n` +
+            `This is the actual cross-chain transfer.\n\n` +
+            `Next Steps:\n` +
+            `1. Go to "Pending Transactions" tab\n` +
+            `2. Find the CCIP transfer transaction (to: CCIP Router)\n` +
+            `3. Confirm with other owners (if needed)\n` +
+            `4. Execute to send tokens cross-chain! 🚀\n\n` +
+            `After execution, track your transfer below.`
         );
-      }
 
-      // Reset form
-      setFormData({
-        destinationNetwork: "",
-        tokenSymbol: "",
-        amount: "",
-        recipientAddress: "",
-      });
-      setFeeEstimate(null);
-      setBalanceCheck(null);
+        // Clear saved transfer and reset form after successful CCIP proposal
+        setLastProposedTransfer(null);
+        setFormData({
+          destinationNetwork: "",
+          tokenSymbol: "",
+          amount: "",
+          recipientAddress: "",
+        });
+        setFeeEstimate(null);
+        setBalanceCheck(null);
+      }
 
       // Call success callback to refresh parent
       setTimeout(() => {
@@ -312,6 +358,33 @@ export default function CCIPTransfer({
 
       {error && <div className="error-message">{error}</div>}
       {success && <div className="success-message">{success}</div>}
+
+      {lastProposedTransfer && (
+        <div
+          className="info-message"
+          style={{
+            backgroundColor: "#fff3cd",
+            borderColor: "#ffc107",
+            color: "#856404",
+          }}
+        >
+          <strong>📋 Pending Approval Workflow</strong>
+          <p style={{ margin: "8px 0" }}>
+            You have a pending approval transaction. After executing it, click
+            "Propose Transfer" below to send the actual CCIP transfer.
+          </p>
+          {formData.destinationNetwork === "" && (
+            <button
+              type="button"
+              onClick={handleRestoreLastTransfer}
+              className="secondary-button"
+              style={{ fontSize: "14px", padding: "6px 12px" }}
+            >
+              🔄 Restore Transfer Details
+            </button>
+          )}
+        </div>
+      )}
 
       <form onSubmit={handleProposeTransfer}>
         {/* Source Network (Read-only) */}

@@ -15,6 +15,7 @@ import type { TransactionData, SafeTransaction } from "../lib/safeFlow";
 import { getSafeInfo, getChainId } from "../lib/safe";
 import { syncCompanyData } from "../lib/api";
 import CCIPTransfer from "./CCIPTransfer";
+import DirectCCIPTransfer from "./DirectCCIPTransfer";
 
 interface SafeTransactionsProps {
   safeAddress: string;
@@ -41,7 +42,7 @@ export default function SafeTransactions({
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string>("");
   const [activeTab, setActiveTab] = useState<
-    "transactions" | "ccip" | "owners"
+    "transactions" | "ccip" | "direct-ccip" | "owners"
   >("transactions");
 
   // Form states
@@ -361,6 +362,29 @@ export default function SafeTransactions({
         </button>
         <button
           className={
+            activeTab === "direct-ccip" ? "tab-button active" : "tab-button"
+          }
+          onClick={() => setActiveTab("direct-ccip")}
+        >
+          <svg
+            width="20"
+            height="20"
+            viewBox="0 0 20 20"
+            fill="none"
+            style={{ marginRight: "6px" }}
+          >
+            <path
+              d="M13 2L3 14H10L7 18L17 6H10L13 2Z"
+              stroke="currentColor"
+              strokeWidth="2"
+              strokeLinecap="round"
+              strokeLinejoin="round"
+            />
+          </svg>
+          Direct CCIP
+        </button>
+        <button
+          className={
             activeTab === "owners" ? "tab-button active" : "tab-button"
           }
           onClick={() => setActiveTab("owners")}
@@ -584,6 +608,11 @@ export default function SafeTransactions({
           userAddress={userAddress}
           onSuccess={loadSafeData}
         />
+      )}
+
+      {/* Direct CCIP Tab Content */}
+      {activeTab === "direct-ccip" && (
+        <DirectCCIPTransfer provider={provider} userAddress={userAddress} />
       )}
 
       {/* Owner Management Tab Content */}

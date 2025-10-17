@@ -9,7 +9,6 @@ import {
   createPublicClient,
   http,
   encodeAbiParameters,
-  parseAbiParameters,
   encodeFunctionData,
 } from "viem";
 import { getRawProvider } from "./web3auth";
@@ -96,6 +95,13 @@ export const proposeTransaction = async (
 ): Promise<string> => {
   try {
     console.log("Proposing transaction to Safe:", safeAddress);
+    console.log("📝 Transaction data:", {
+      to: txData.to,
+      value: txData.value,
+      dataLength: txData.data?.length,
+      dataPreview: txData.data?.slice(0, 66) + "...",
+      operation: txData.operation,
+    });
 
     // Initialize Protocol Kit
     const safe = await initProtocolKit(safeAddress, provider);
@@ -107,36 +113,40 @@ export const proposeTransaction = async (
     // Initialize API Kit
     const apiKit = await initApiKit(chainId);
 
-    // Prepare transaction data
-    const safeTransactionData: MetaTransactionData = {
-      to: txData.to,
-      value: txData.value,
-      data: txData.data,
-      operation: txData.operation || 0,
-    };
-
-    // Create Safe transaction
+    // Create a Safe transaction
     const safeTransaction = await safe.createTransaction({
-      transactions: [safeTransactionData],
+      transactions: [txData],
     });
 
-    // Get transaction hash
-    const safeTxHash = await safe.getTransactionHash(safeTransaction);
+    console.log("📊 Safe transaction created:", {
+      to: safeTransaction.data.to,
+      value: safeTransaction.data.value,
+      data: safeTransaction.data.data.slice(0, 66) + "...",
+      operation: safeTransaction.data.operation,
+      nonce: safeTransaction.data.nonce,
+    });
 
     // Sign the transaction
-    const senderSignature = await safe.signTransaction(safeTransaction);
+    const signedTransaction = await safe.signTransaction(safeTransaction);
 
-    // Get sender address
-    const signer = await provider.getSigner();
-    const senderAddress = await signer.getAddress();
+    // Get the Safe transaction hash
+    const safeTxHash = await safe.getTransactionHash(signedTransaction);
 
-    // Propose transaction to the service
+    console.log("🔐 Safe transaction hash:", safeTxHash);
+    console.log("✍️ Signature:", signedTransaction.encodedSignatures());
+
+    // Propose the transaction to the Safe Transaction Service
+    const senderAddress = await safe.getSafeProvider().getSignerAddress();
+    if (!senderAddress) {
+      throw new Error("Could not get signer address");
+    }
+
     await apiKit.proposeTransaction({
       safeAddress,
-      safeTransactionData: safeTransaction.data,
+      safeTransactionData: signedTransaction.data,
       safeTxHash,
       senderAddress,
-      senderSignature: senderSignature.encodedSignatures(),
+      senderSignature: signedTransaction.encodedSignatures(),
     });
 
     console.log("Transaction proposed successfully:", safeTxHash);
@@ -172,6 +182,15 @@ export const confirmTransaction = async (
     // Get the transaction from the service
     const transaction = await apiKit.getTransaction(safeTxHash);
 
+    console.log("📝 Transaction to confirm:", {
+      to: transaction.to,
+      value: transaction.value,
+      data: transaction.data?.slice(0, 66) + "...",
+      dataLength: transaction.data?.length,
+      operation: transaction.operation,
+      nonce: transaction.nonce,
+    });
+
     // Create Safe transaction object
     const safeTransaction = await safe.createTransaction({
       transactions: [
@@ -184,8 +203,19 @@ export const confirmTransaction = async (
       ],
     });
 
+    // Verify transaction hash matches
+    const computedTxHash = await safe.getTransactionHash(safeTransaction);
+    console.log("🔍 Computed tx hash:", computedTxHash);
+    console.log("🔍 Expected tx hash:", safeTxHash);
+
+    if (computedTxHash !== safeTxHash) {
+      console.error("❌ Transaction hash mismatch during confirmation!");
+      throw new Error("Transaction hash mismatch - cannot confirm");
+    }
+
     // Sign the transaction
     const signature = await safe.signTransaction(safeTransaction);
+    console.log("✍️ Signature generated:", signature.encodedSignatures());
 
     // Submit the signature to the service
     await apiKit.confirmTransaction(safeTxHash, signature.encodedSignatures());
@@ -269,13 +299,43 @@ export const executeTransaction = async (
     );
 
     // Add sorted signatures to the transaction
+    // CRITICAL: Signature format must be exactly 65 bytes (130 hex chars + 0x)
     confirmationsArray.forEach((confirmation) => {
+      // Ensure signature is properly formatted (remove 0x if present)
+      let sig = confirmation.signature;
+      if (sig.startsWith("0x")) {
+        sig = sig.slice(2);
+      }
+
+      // Validate signature length (should be 130 hex chars = 65 bytes)
+      if (sig.length !== 130) {
+        console.error(
+          `❌ Invalid signature length for ${confirmation.owner}: ${sig.length} (expected 130)`
+        );
+        throw new Error(
+          `Invalid signature length for ${confirmation.owner}: ${sig.length} chars`
+        );
+      }
+
+      // Parse signature components: r (32 bytes), s (32 bytes), v (1 byte)
+      const r = "0x" + sig.slice(0, 64);
+      const s = "0x" + sig.slice(64, 128);
+      const v = parseInt(sig.slice(128, 130), 16);
+
+      console.log(`🔐 Adding signature for ${confirmation.owner}:`, {
+        r,
+        s,
+        v,
+        fullSig: "0x" + sig,
+      });
+
+      const fullSig = "0x" + sig;
       safeTransaction.addSignature({
         signer: confirmation.owner,
-        data: confirmation.signature,
+        data: fullSig,
         isContractSignature: false,
-        staticPart: () => confirmation.signature.slice(0, 130),
-        dynamicPart: () => confirmation.signature.slice(130),
+        staticPart: () => fullSig.slice(0, 132), // 0x + 130 chars (r + s + v)
+        dynamicPart: () => "0x", // No dynamic part for EOA signatures
       });
     });
 
@@ -283,6 +343,18 @@ export const executeTransaction = async (
     const encodedSigs = safeTransaction.encodedSignatures();
     console.log("🔐 Encoded signatures:", encodedSigs);
     console.log("🔐 Encoded signatures length:", encodedSigs.length);
+
+    // Verify transaction hash matches before execution
+    const computedTxHash = await safe.getTransactionHash(safeTransaction);
+    console.log("🔍 Computed transaction hash:", computedTxHash);
+    console.log("🔍 Expected transaction hash:", safeTxHash);
+
+    if (computedTxHash !== safeTxHash) {
+      console.error("❌ Transaction hash mismatch!");
+      throw new Error(
+        "Transaction hash mismatch - transaction may have been modified"
+      );
+    }
 
     // Execute the transaction
     const executeTxResponse = await safe.executeTransaction(safeTransaction);
@@ -726,6 +798,8 @@ import { getNetworkConfig, getTokenBySymbol } from "./ccipConfig";
 
 // Import CCIP SDK and ethers adapters
 import { createClient, IERC20ABI } from "@chainlink/ccip-js";
+// Import Router ABI from CCIP SDK for proper encoding
+import RouterABI from "@chainlink/ccip-js/dist/abi/Router.json";
 
 /**
  * Interface for CCIP transfer parameters
@@ -908,70 +982,72 @@ export const buildCCIPSafeTransaction = async (
     // but proposing it through Safe
 
     // Encode receiver address as bytes (must be ABI-encoded address, not just address)
-    const receiverBytes = encodeAbiParameters(parseAbiParameters("address"), [
-      params.recipientAddress as `0x${string}`,
-    ]);
+    // CCIP expects receiver as ABI-encoded address in bytes format
+    const receiverBytes = encodeAbiParameters(
+      [{ type: "address" }],
+      [params.recipientAddress as `0x${string}`]
+    );
 
-    // CCIP Router ABI for ccipSend function
-    const ccipRouterABI = [
-      {
-        inputs: [
-          {
-            internalType: "uint64",
-            name: "destinationChainSelector",
-            type: "uint64",
-          },
-          {
-            components: [
-              { internalType: "bytes", name: "receiver", type: "bytes" },
-              { internalType: "bytes", name: "data", type: "bytes" },
-              {
-                components: [
-                  { internalType: "address", name: "token", type: "address" },
-                  { internalType: "uint256", name: "amount", type: "uint256" },
-                ],
-                internalType: "struct Client.EVMTokenAmount[]",
-                name: "tokenAmounts",
-                type: "tuple[]",
-              },
-              {
-                internalType: "address",
-                name: "feeToken",
-                type: "address",
-              },
-              { internalType: "bytes", name: "extraArgs", type: "bytes" },
-            ],
-            internalType: "struct Client.EVM2AnyMessage",
-            name: "message",
-            type: "tuple",
-          },
-        ],
-        name: "ccipSend",
-        outputs: [{ internalType: "bytes32", name: "", type: "bytes32" }],
-        stateMutability: "payable",
-        type: "function",
-      },
-    ] as const;
+    console.log(`[CCIP Build] Receiver address: ${params.recipientAddress}`);
+    console.log(`[CCIP Build] Receiver bytes: ${receiverBytes}`);
 
-    // Build CCIP message structure
+    // Encode extraArgs V2 using CCIP SDK standard format
+    // V2 format: 0x181dcf10 (V2 tag from SDK) + ABI encoded (gasLimit, allowOutOfOrderExecution)
+    // Gas limit must be high enough for destination chain execution
+    const gasLimit = 200000; // 200k gas - matching common CCIP usage
+    const allowOutOfOrderExecution = true; // Allow out-of-order execution (SDK default)
+    const extraArgsV2Encoded = encodeAbiParameters(
+      [
+        { type: "uint256", name: "gasLimit" },
+        { type: "bool", name: "allowOutOfOrderExecution" },
+      ],
+      [BigInt(gasLimit), allowOutOfOrderExecution]
+    );
+
+    // Add V2 selector (0x181dcf10) to the beginning - this is the correct CCIP SDK tag
+    const evmExtraArgsV2Tag = "0x181dcf10";
+    const extraArgsV2 = (evmExtraArgsV2Tag +
+      extraArgsV2Encoded.slice(2)) as `0x${string}`;
+
+    console.log(
+      `[CCIP Build] ExtraArgs V2 (gasLimit=${gasLimit}, allowOutOfOrder=${allowOutOfOrderExecution}): ${extraArgsV2}`
+    );
+
+    // Build CCIP message structure following SDK format exactly
     const ccipMessage = {
       receiver: receiverBytes,
-      data: "0x" as `0x${string}`,
+      data: "0x0000000000000000000000000000000000000000000000000000000000000000" as `0x${string}`, // zeroHash for no data
       tokenAmounts: [
         {
           token: token.address as `0x${string}`,
           amount: amountBN,
         },
       ],
-      feeToken: "0x0000000000000000000000000000000000000000" as `0x${string}`, // Native token for fees
-      extraArgs: "0x" as `0x${string}`, // Default extra args
+      feeToken: "0x0000000000000000000000000000000000000000" as `0x${string}`, // zeroAddress for native token fees
+      extraArgs: extraArgsV2, // V2 encoded extra args with correct tag
     };
 
-    // Use encodeFunctionData to properly encode the function call
+    // Debug: Log complete CCIP message structure
+    console.log("[CCIP Build] Complete message structure:", {
+      destinationChainSelector: destConfig.chainSelector,
+      message: {
+        receiver: receiverBytes,
+        data: "0x",
+        tokenAmounts: ccipMessage.tokenAmounts.map((t) => ({
+          token: t.token,
+          amount: t.amount.toString(),
+        })),
+        feeToken: ccipMessage.feeToken,
+        extraArgs: extraArgsV2,
+      },
+    });
+
+    // Use encodeFunctionData with official Router ABI from CCIP SDK
+    // Note: Viem will auto-convert string to uint64 based on ABI, so pass string directly like SDK does
     const fullCallData = encodeFunctionData({
-      abi: ccipRouterABI,
+      abi: RouterABI,
       functionName: "ccipSend",
-      args: [BigInt(destConfig.chainSelector), ccipMessage],
+      args: [destConfig.chainSelector, ccipMessage],
     });
 
     console.log(

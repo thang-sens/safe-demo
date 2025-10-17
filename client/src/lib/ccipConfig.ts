@@ -171,6 +171,14 @@ export const CCIP_NETWORKS: Record<NetworkName, NetworkConfig> = {
   },
 };
 
+export const NetworkNameMapping: Record<string, NetworkName> = {
+  "Ethereum Sepolia": "ethereum-sepolia",
+  "Arbitrum Sepolia": "arbitrum-sepolia",
+  "Avalanche Fuji": "avalanche-fuji",
+  "Polygon Amoy": "polygon-amoy",
+  "Base Sepolia": "base-sepolia",
+};
+
 /**
  * Get network configuration by name
  */
