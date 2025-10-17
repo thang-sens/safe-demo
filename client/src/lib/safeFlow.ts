@@ -10,6 +10,7 @@ import {
   http,
   encodeAbiParameters,
   parseAbiParameters,
+  encodeFunctionData,
 } from "viem";
 import { getRawProvider } from "./web3auth";
 
@@ -873,8 +874,15 @@ export const buildCCIPSafeTransaction = async (
 
     const amountBN = BigInt(params.amount);
 
+    console.log(
+      `[CCIP Build] Current allowance: ${currentAllowance}, needed: ${amountBN}`
+    );
+
     // If allowance is insufficient, add approval transaction
     if (currentAllowance < amountBN) {
+      console.log(
+        "[CCIP Build] Insufficient allowance - adding approval transaction"
+      );
       // Use ethers to encode the approval data for Safe transaction
       const tokenContract = new ethers.Contract(
         token.address,
@@ -899,10 +907,51 @@ export const buildCCIPSafeTransaction = async (
     // We need to manually encode the ccipSend call since we're not directly calling it
     // but proposing it through Safe
 
-    // Encode receiver address as bytes
+    // Encode receiver address as bytes (must be ABI-encoded address, not just address)
     const receiverBytes = encodeAbiParameters(parseAbiParameters("address"), [
       params.recipientAddress as `0x${string}`,
     ]);
+
+    // CCIP Router ABI for ccipSend function
+    const ccipRouterABI = [
+      {
+        inputs: [
+          {
+            internalType: "uint64",
+            name: "destinationChainSelector",
+            type: "uint64",
+          },
+          {
+            components: [
+              { internalType: "bytes", name: "receiver", type: "bytes" },
+              { internalType: "bytes", name: "data", type: "bytes" },
+              {
+                components: [
+                  { internalType: "address", name: "token", type: "address" },
+                  { internalType: "uint256", name: "amount", type: "uint256" },
+                ],
+                internalType: "struct Client.EVMTokenAmount[]",
+                name: "tokenAmounts",
+                type: "tuple[]",
+              },
+              {
+                internalType: "address",
+                name: "feeToken",
+                type: "address",
+              },
+              { internalType: "bytes", name: "extraArgs", type: "bytes" },
+            ],
+            internalType: "struct Client.EVM2AnyMessage",
+            name: "message",
+            type: "tuple",
+          },
+        ],
+        name: "ccipSend",
+        outputs: [{ internalType: "bytes32", name: "", type: "bytes32" }],
+        stateMutability: "payable",
+        type: "function",
+      },
+    ] as const;
 
     // Build CCIP message structure
     const ccipMessage = {
@@ -914,23 +963,23 @@ export const buildCCIPSafeTransaction = async (
           amount: amountBN,
         },
       ],
-      feeToken: "0x0000000000000000000000000000000000000000" as `0x${string}`, // Native token
-      extraArgs: "0x" as `0x${string}`,
+      feeToken: "0x0000000000000000000000000000000000000000" as `0x${string}`, // Native token for fees
+      extraArgs: "0x" as `0x${string}`, // Default extra args
     };
 
-    // Encode ccipSend function call
-    const ccipSendData = encodeAbiParameters(
-      parseAbiParameters(
-        "uint64 destinationChainSelector, (bytes receiver, bytes data, (address token, uint256 amount)[] tokenAmounts, address feeToken, bytes extraArgs) message"
-      ),
-      [BigInt(destConfig.chainSelector), ccipMessage]
-    );
+    // Use encodeFunctionData to properly encode the function call
+    const fullCallData = encodeFunctionData({
+      abi: ccipRouterABI,
+      functionName: "ccipSend",
+      args: [BigInt(destConfig.chainSelector), ccipMessage],
+    });
 
-    // Create the full function call with selector
-    // ccipSend function selector is 0x96f4e9f9
-    const functionSelector = "0x96f4e9f9";
-    const fullCallData = (functionSelector +
-      ccipSendData.slice(2)) as `0x${string}`;
+    console.log(
+      `[CCIP Build] CCIP send call data length: ${fullCallData.length} bytes`
+    );
+    console.log(
+      `[CCIP Build] Fee (value): ${estimatedFee.feeInWei} wei (${estimatedFee.feeInEther} ETH)`
+    );
 
     // Add CCIP send transaction (with fee as value)
     transactions.push({
@@ -939,6 +988,10 @@ export const buildCCIPSafeTransaction = async (
       data: fullCallData,
       operation: 0, // Call
     });
+
+    console.log(
+      `[CCIP Build] Total transactions to execute: ${transactions.length}`
+    );
 
     return {
       transactions,
@@ -958,7 +1011,12 @@ export const proposeCCIPTransfer = async (
   params: CCIPTransferParams,
   safeAddress: string,
   provider: BrowserProvider
-): Promise<{ safeTxHash: string; estimatedFee: CCIPFeeEstimate }> => {
+): Promise<{
+  safeTxHash: string;
+  estimatedFee: CCIPFeeEstimate;
+  needsApproval: boolean;
+  approvalTxHash?: string;
+}> => {
   try {
     // Build CCIP transaction(s)
     const { transactions, estimatedFee } = await buildCCIPSafeTransaction(
@@ -967,15 +1025,22 @@ export const proposeCCIPTransfer = async (
       provider
     );
 
-    // If we have multiple transactions (approval + send), we need to batch them
-    // For now, we'll handle them separately
-    // In production, you might want to use Safe's batch transaction feature
+    console.log(
+      `[CCIP] Built ${transactions.length} transaction(s):`,
+      transactions
+    );
 
-    let finalTxHash: string;
+    // IMPORTANT: We cannot batch approval + CCIP send because Safe uses MultiSend with DelegateCall
+    // which doesn't work with ERC20 token approvals (storage context issue)
+    //
+    // Solution: Propose transactions separately
+    // 1. If approval needed: propose approval first
+    // 2. Then propose CCIP send (user must execute approval before this)
 
     if (transactions.length === 1) {
-      // Only CCIP send (no approval needed)
-      finalTxHash = await proposeTransaction(
+      console.log("[CCIP] Single transaction - no approval needed");
+      // Only CCIP send (no approval needed - token already approved)
+      const finalTxHash = await proposeTransaction(
         safeAddress,
         {
           to: transactions[0].to,
@@ -985,27 +1050,45 @@ export const proposeCCIPTransfer = async (
         },
         provider
       );
+
+      return {
+        safeTxHash: finalTxHash,
+        estimatedFee,
+        needsApproval: false,
+      };
     } else {
-      // Multiple transactions - propose the last one (CCIP send)
-      // NOTE: In a real implementation, you'd want to batch these or handle sequentially
-      // For this POC, we'll just propose the CCIP send and assume approval is done separately
-      const ccipTx = transactions[transactions.length - 1];
-      finalTxHash = await proposeTransaction(
+      // Multiple transactions: approval + CCIP send
+      console.log(
+        "[CCIP] Approval needed - proposing approval transaction first"
+      );
+
+      // Propose ONLY approval transaction
+      const approvalTx = transactions[0];
+      const approvalTxHash = await proposeTransaction(
         safeAddress,
         {
-          to: ccipTx.to,
-          value: ccipTx.value,
-          data: ccipTx.data,
-          operation: ccipTx.operation,
+          to: approvalTx.to,
+          value: approvalTx.value,
+          data: approvalTx.data,
+          operation: approvalTx.operation,
         },
         provider
       );
-    }
 
-    return {
-      safeTxHash: finalTxHash,
-      estimatedFee,
-    };
+      console.log("[CCIP] ✅ Approval transaction proposed:", approvalTxHash);
+      console.log(
+        "[CCIP] ⚠️ User must confirm and execute this approval BEFORE proposing CCIP transfer"
+      );
+
+      // Return approval transaction hash
+      // User must execute this before they can propose the CCIP send
+      return {
+        safeTxHash: approvalTxHash,
+        estimatedFee,
+        needsApproval: true,
+        approvalTxHash,
+      };
+    }
   } catch (error) {
     console.error("Error proposing CCIP transfer:", error);
     throw error;

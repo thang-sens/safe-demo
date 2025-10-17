@@ -38,7 +38,7 @@ export default function CCIPTransfer({
     tokenBalance: string;
     nativeBalance: string;
   } | null>(null);
-  
+
   // CCIP tracking state
   const [ccipMessageId, setCcipMessageId] = useState<string>("");
   const [trackingTxHash, setTrackingTxHash] = useState<string>("");
@@ -89,16 +89,17 @@ export default function CCIPTransfer({
     setSuccess("");
 
     try {
-      const token = supportedTokens.find((t) => t.symbol === formData.tokenSymbol);
+      const token = supportedTokens.find(
+        (t) => t.symbol === formData.tokenSymbol
+      );
       if (!token) {
         throw new Error("Token not found");
       }
 
       // Convert amount to smallest unit (wei for ETH-like tokens)
-      const amountInSmallestUnit = ethers.parseUnits(
-        formData.amount,
-        token.decimals
-      ).toString();
+      const amountInSmallestUnit = ethers
+        .parseUnits(formData.amount, token.decimals)
+        .toString();
 
       const params: CCIPTransferParams = {
         sourceNetwork,
@@ -113,7 +114,11 @@ export default function CCIPTransfer({
       setFeeEstimate(fee);
 
       // Check balances
-      const balances = await checkCCIPTransferBalance(params, safeAddress, provider);
+      const balances = await checkCCIPTransferBalance(
+        params,
+        safeAddress,
+        provider
+      );
       setBalanceCheck(balances);
 
       setSuccess("Fee calculated successfully!");
@@ -144,7 +149,10 @@ export default function CCIPTransfer({
       return false;
     }
 
-    if (!formData.recipientAddress || !ethers.isAddress(formData.recipientAddress)) {
+    if (
+      !formData.recipientAddress ||
+      !ethers.isAddress(formData.recipientAddress)
+    ) {
       setError("Please enter a valid recipient address");
       return false;
     }
@@ -168,15 +176,16 @@ export default function CCIPTransfer({
     setSuccess("");
 
     try {
-      const token = supportedTokens.find((t) => t.symbol === formData.tokenSymbol);
+      const token = supportedTokens.find(
+        (t) => t.symbol === formData.tokenSymbol
+      );
       if (!token) {
         throw new Error("Token not found");
       }
 
-      const amountInSmallestUnit = ethers.parseUnits(
-        formData.amount,
-        token.decimals
-      ).toString();
+      const amountInSmallestUnit = ethers
+        .parseUnits(formData.amount, token.decimals)
+        .toString();
 
       const params: CCIPTransferParams = {
         sourceNetwork,
@@ -188,9 +197,28 @@ export default function CCIPTransfer({
 
       const result = await proposeCCIPTransfer(params, safeAddress, provider);
 
-      setSuccess(
-        `CCIP transfer proposed successfully! Transaction hash: ${result.safeTxHash.substring(0, 10)}...`
-      );
+      if (result.needsApproval) {
+        // Approval transaction was proposed
+        setSuccess(
+          `⚠️ Token approval needed! Approval transaction proposed: ${result.approvalTxHash!.substring(
+            0,
+            10
+          )}...\n\n` +
+            `Please:\n` +
+            `1. Find the approval transaction in "Pending Transactions"\n` +
+            `2. Confirm it with other owners if needed\n` +
+            `3. Execute the approval transaction\n` +
+            `4. Then come back and propose the CCIP transfer again`
+        );
+      } else {
+        // CCIP transfer was proposed directly (no approval needed)
+        setSuccess(
+          `✅ CCIP transfer proposed successfully! Transaction hash: ${result.safeTxHash.substring(
+            0,
+            10
+          )}...`
+        );
+      }
 
       // Reset form
       setFormData({
@@ -232,7 +260,7 @@ export default function CCIPTransfer({
     try {
       // Get message ID from transaction
       const messageId = await getCCIPMessageId(trackingTxHash, provider);
-      
+
       if (!messageId) {
         setError("Could not find CCIP message ID in transaction");
         setLoading(false);
@@ -244,7 +272,7 @@ export default function CCIPTransfer({
       // Check message status
       const status = await checkCCIPTransferStatus(messageId);
       setMessageStatus(status);
-      
+
       setSuccess(`Found CCIP message! Track it on CCIP Explorer`);
     } catch (err) {
       const errorMessage =
@@ -278,8 +306,8 @@ export default function CCIPTransfer({
       </h3>
 
       <p className="info-text">
-        Transfer tokens securely across different blockchains using Chainlink CCIP.
-        This transaction will require multi-sig approval from Safe owners.
+        Transfer tokens securely across different blockchains using Chainlink
+        CCIP. This transaction will require multi-sig approval from Safe owners.
       </p>
 
       {error && <div className="error-message">{error}</div>}
@@ -309,9 +337,14 @@ export default function CCIPTransfer({
           >
             <option value="">Select destination network</option>
             {destinationNetworks.map((network) => (
-              <option key={network.chainId} value={Object.keys(CCIP_NETWORKS).find(
-                key => CCIP_NETWORKS[key as NetworkName].chainId === network.chainId
-              )}>
+              <option
+                key={network.chainId}
+                value={Object.keys(CCIP_NETWORKS).find(
+                  (key) =>
+                    CCIP_NETWORKS[key as NetworkName].chainId ===
+                    network.chainId
+                )}
+              >
                 {network.name}
               </option>
             ))}
@@ -346,7 +379,9 @@ export default function CCIPTransfer({
               type="number"
               step="any"
               value={formData.amount}
-              onChange={(e) => setFormData({ ...formData, amount: e.target.value })}
+              onChange={(e) =>
+                setFormData({ ...formData, amount: e.target.value })
+              }
               placeholder="0.0"
               disabled={loading}
               required
@@ -360,10 +395,14 @@ export default function CCIPTransfer({
                     marginLeft: "8px",
                   }}
                 >
-                  (Balance: {ethers.formatUnits(
+                  (Balance:{" "}
+                  {ethers.formatUnits(
                     balanceCheck.tokenBalance,
-                    supportedTokens.find((t) => t.symbol === formData.tokenSymbol)?.decimals || 18
-                  )} {formData.tokenSymbol})
+                    supportedTokens.find(
+                      (t) => t.symbol === formData.tokenSymbol
+                    )?.decimals || 18
+                  )}{" "}
+                  {formData.tokenSymbol})
                 </span>
               )}
             </small>
@@ -384,7 +423,9 @@ export default function CCIPTransfer({
               disabled={loading}
               required
             />
-            <small>The address that will receive tokens on the destination network</small>
+            <small>
+              The address that will receive tokens on the destination network
+            </small>
           </div>
         )}
 
@@ -408,7 +449,8 @@ export default function CCIPTransfer({
               <strong>Fee:</strong> {feeEstimate.feeInEther} ETH
             </p>
             <p className="fee-note">
-              This fee is paid on the source network ({CCIP_NETWORKS[sourceNetwork].name})
+              This fee is paid on the source network (
+              {CCIP_NETWORKS[sourceNetwork].name})
             </p>
             {balanceCheck && (
               <p
@@ -429,7 +471,11 @@ export default function CCIPTransfer({
         {feeEstimate && (
           <button
             type="submit"
-            disabled={loading || !balanceCheck?.hasTokenBalance || !balanceCheck?.hasFeeBalance}
+            disabled={
+              loading ||
+              !balanceCheck?.hasTokenBalance ||
+              !balanceCheck?.hasFeeBalance
+            }
             className="primary"
           >
             {loading ? "Proposing..." : "Propose Cross-Chain Transfer"}
@@ -609,7 +655,8 @@ export default function CCIPTransfer({
         </h3>
 
         <p className="info-text">
-          After executing a CCIP transfer, track its status using the transaction hash from the executed Safe transaction.
+          After executing a CCIP transfer, track its status using the
+          transaction hash from the executed Safe transaction.
         </p>
 
         <form onSubmit={handleTrackMessage}>
@@ -622,7 +669,9 @@ export default function CCIPTransfer({
               value={trackingTxHash}
               onChange={(e) => setTrackingTxHash(e.target.value)}
             />
-            <small>Enter the transaction hash from the executed Safe transaction</small>
+            <small>
+              Enter the transaction hash from the executed Safe transaction
+            </small>
           </div>
 
           <button
@@ -636,20 +685,24 @@ export default function CCIPTransfer({
 
         {messageStatus && (
           <div className="tracking-result">
-            <p><strong>Status:</strong> {messageStatus.status}</p>
-            
+            <p>
+              <strong>Status:</strong> {messageStatus.status}
+            </p>
+
             {ccipMessageId && (
               <div>
-                <p><strong>Message ID:</strong></p>
+                <p>
+                  <strong>Message ID:</strong>
+                </p>
                 <div className="message-id">{ccipMessageId}</div>
               </div>
             )}
 
             {messageStatus.explorerUrl && (
               <p style={{ marginTop: "1rem" }}>
-                <a 
-                  href={messageStatus.explorerUrl} 
-                  target="_blank" 
+                <a
+                  href={messageStatus.explorerUrl}
+                  target="_blank"
                   rel="noopener noreferrer"
                 >
                   View on CCIP Explorer →

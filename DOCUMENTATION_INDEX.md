@@ -77,6 +77,15 @@
 | **[REJECT_TRANSACTION_SUMMARY.md](REJECT_TRANSACTION_SUMMARY.md)** | Quick summary                    | Everyone   |
 | **[REJECT_TRANSACTION_TESTING.md](REJECT_TRANSACTION_TESTING.md)** | Testing guide                    | QA/Testers |
 
+### Troubleshooting & Fixes (NEW! 🔧)
+
+| File                                                       | Purpose                  | Audience   |
+| ---------------------------------------------------------- | ------------------------ | ---------- |
+| **[GS013_FIX_CCIP.md](GS013_FIX_CCIP.md)**                 | GS013 error fix for CCIP | Developers |
+| **[GS013_CCIP_FIX_SUMMARY.md](GS013_CCIP_FIX_SUMMARY.md)** | Quick fix summary        | Everyone   |
+| **[SIGNING_PROVIDER_FIX.md](SIGNING_PROVIDER_FIX.md)**     | eth_signTypedData_v4 fix | Developers |
+| **[BROWSER_CACHE_FIX.md](BROWSER_CACHE_FIX.md)**           | Browser caching issues   | Users      |
+
 ### Enhancement Ideas
 
 | File                                                         | Purpose             | Audience           |
