@@ -148,7 +148,7 @@ export const CCIP_NETWORKS: Record<NetworkName, NetworkConfig> = {
       {
         name: "CCIP-LnM Test Token",
         symbol: "CCIP-LnM",
-        address: "0x70F5c5C40b873EA597776DA2C21929A8282A953a35", // CCIP-LnM on Fuji
+        address: "0x70F5c5C40b873EA597776DA2C21929A8282A953a", // CCIP-LnM on Fuji (clCCIP-LnM)
         decimals: 18,
       },
     ],

@@ -1192,20 +1192,31 @@ export const checkCCIPTransferBalance = async (
       throw new Error(`Token ${params.tokenSymbol} not found`);
     }
 
-    // Create viem client for CCIP SDK
-    const sourceChain = getViemChain(params.sourceNetwork);
-    const publicClient = createPublicClient({
-      chain: sourceChain,
-      transport: http(sourceConfig.rpcUrl),
+    console.log("🔍 Checking balance for:", {
+      token: params.tokenSymbol,
+      tokenAddress: token.address,
+      safeAddress: safeAddress,
+      network: params.sourceNetwork,
+      rpcUrl: sourceConfig.rpcUrl,
     });
 
-    // Check token balance using viem
-    const tokenBalance = (await publicClient.readContract({
-      address: token.address as `0x${string}`,
-      abi: IERC20ABI as any,
-      functionName: "balanceOf",
-      args: [safeAddress as `0x${string}`],
-    })) as bigint;
+    // Use ethers provider to read token balance directly
+    // This ensures we're reading from the same chain the user is connected to
+    const tokenContract = new ethers.Contract(
+      token.address,
+      IERC20ABI as any,
+      provider
+    );
+
+    console.log("📞 Calling balanceOf on token contract...");
+    const tokenBalance = (await tokenContract.balanceOf(safeAddress)) as bigint;
+
+    console.log("💰 Token balance result:", {
+      tokenSymbol: params.tokenSymbol,
+      balanceRaw: tokenBalance.toString(),
+      balanceFormatted: Number(tokenBalance) / 10 ** token.decimals,
+      decimals: token.decimals,
+    });
 
     const hasTokenBalance = tokenBalance >= BigInt(params.amount);
 
@@ -1221,7 +1232,12 @@ export const checkCCIPTransferBalance = async (
       nativeBalance: nativeBalance.toString(),
     };
   } catch (error) {
-    console.error("Error checking balances:", error);
+    console.error("❌ Error checking balances:", error);
+    console.error("Error details:", {
+      tokenSymbol: params.tokenSymbol,
+      safeAddress,
+      network: params.sourceNetwork,
+    });
     throw error;
   }
 };
