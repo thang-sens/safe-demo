@@ -63,6 +63,18 @@ export const CCIP_NETWORKS: Record<NetworkName, NetworkConfig> = {
         address: "0x1c7D4B196Cb0C7B01d743Fbc6116a902379C7238", // USDC on Sepolia
         decimals: 6,
       },
+      {
+        name: "CCIP-BnM Test Token",
+        symbol: "CCIP-BnM",
+        address: "0xFd57b4ddBf88a4e07fF4e34C487b99af2Fe82a05", // CCIP-BnM on Sepolia
+        decimals: 18,
+      },
+      {
+        name: "CCIP-LnM Test Token",
+        symbol: "CCIP-LnM",
+        address: "0x466D489b6d36E7E3b824ef491C225F5830E81cC1", // CCIP-LnM on Sepolia
+        decimals: 18,
+      },
     ],
   },
   "arbitrum-sepolia": {
@@ -88,6 +100,18 @@ export const CCIP_NETWORKS: Record<NetworkName, NetworkConfig> = {
         symbol: "USDC",
         address: "0x75faf114eafb1BDbe2F0316DF893fd58CE46AA4d", // USDC on Arbitrum Sepolia
         decimals: 6,
+      },
+      {
+        name: "CCIP-BnM Test Token",
+        symbol: "CCIP-BnM",
+        address: "0xA8C0c11bf64AF62CDCA6f93D3769B88BdD7cb93D", // CCIP-BnM on Arbitrum Sepolia
+        decimals: 18,
+      },
+      {
+        name: "CCIP-LnM Test Token",
+        symbol: "CCIP-LnM",
+        address: "0x139E99f0ab4084E14e6bb7DacA289a91a2d92927", // CCIP-LnM on Arbitrum Sepolia
+        decimals: 18,
       },
     ],
   },
@@ -115,6 +139,18 @@ export const CCIP_NETWORKS: Record<NetworkName, NetworkConfig> = {
         address: "0x5425890298aed601595a70AB815c96711a31Bc65", // USDC on Fuji
         decimals: 6,
       },
+      {
+        name: "CCIP-BnM Test Token",
+        symbol: "CCIP-BnM",
+        address: "0xD21341536c5cF5EB1bcb58f6723cE26e8D8E90e4", // CCIP-BnM on Fuji
+        decimals: 18,
+      },
+      {
+        name: "CCIP-LnM Test Token",
+        symbol: "CCIP-LnM",
+        address: "0x70F5c5C40b873EA597776DA2C21929A8282A953a35", // CCIP-LnM on Fuji
+        decimals: 18,
+      },
     ],
   },
   "polygon-amoy": {
@@ -141,6 +177,18 @@ export const CCIP_NETWORKS: Record<NetworkName, NetworkConfig> = {
         address: "0x41E94Eb019C0762f9Bfcf9Fb1E58725BfB0e7582", // USDC on Amoy
         decimals: 6,
       },
+      {
+        name: "CCIP-BnM Test Token",
+        symbol: "CCIP-BnM",
+        address: "0xcab0EF91Bee323d1A617c0a027eE753aFd6997E4", // CCIP-BnM on Amoy
+        decimals: 18,
+      },
+      {
+        name: "CCIP-LnM Test Token",
+        symbol: "CCIP-LnM",
+        address: "0x3d357fb52253e86c8Ee0f80F5FaE4475b68503FF2", // CCIP-LnM on Amoy
+        decimals: 18,
+      },
     ],
   },
   "base-sepolia": {
@@ -166,6 +214,18 @@ export const CCIP_NETWORKS: Record<NetworkName, NetworkConfig> = {
         symbol: "USDC",
         address: "0x036CbD53842c5426634e7929541eC2318f3dCF7e", // USDC on Base Sepolia
         decimals: 6,
+      },
+      {
+        name: "CCIP-BnM Test Token",
+        symbol: "CCIP-BnM",
+        address: "0x88A2d74F47a237a62e7A51cdDa67270CE381555e", // CCIP-BnM on Base Sepolia
+        decimals: 18,
+      },
+      {
+        name: "CCIP-LnM Test Token",
+        symbol: "CCIP-LnM",
+        address: "0xA98FA8A008371b9408195e52734b1768c0d1Cb5c", // CCIP-LnM on Base Sepolia
+        decimals: 18,
       },
     ],
   },

@@ -49,7 +49,44 @@ export const login = async () => {
   if (!web3authProvider) {
     throw new Error("Failed to connect to Web3Auth");
   }
-  console.log("Successfully connected to Web3Auth");
+
+  // Log successful login with user details
+  console.log("✅ Successfully connected to Web3Auth");
+
+  try {
+    // Get and log user info
+    const userInfo = await web3auth.getUserInfo();
+    console.log("👤 User Info:", {
+      email: userInfo.email,
+      name: userInfo.name,
+      profileImage: userInfo.profileImage,
+      verifier: userInfo.verifier,
+      verifierId: userInfo.verifierId,
+    });
+
+    // Get and log wallet address
+    const ethersProvider = new BrowserProvider(web3authProvider);
+    const signer = await ethersProvider.getSigner();
+    const address = await signer.getAddress();
+    console.log("🔑 Wallet Address:", address);
+
+    // ⚠️ WARNING: Logging private key - ONLY FOR DEVELOPMENT
+    // NEVER log private keys in production!
+    // try {
+    //   const privateKey = await web3authProvider.request({
+    //     method: "eth_private_key",
+    //   });
+    //   console.log("🔐 Private Key:", privateKey);
+    //   console.warn(
+    //     "⚠️ WARNING: Private key logged to console. Keep this secure!"
+    //   );
+    // } catch (pkError) {
+    //   console.warn("Could not retrieve private key:", pkError);
+    // }
+  } catch (error) {
+    console.warn("Could not retrieve additional user info:", error);
+  }
+
   return web3authProvider;
 };
 
@@ -90,6 +127,32 @@ export const logout = async () => {
 export const getUserInfo = async () => {
   const userInfo = await web3auth.getUserInfo();
   return userInfo;
+};
+
+export const getPrivateKey = async (): Promise<string> => {
+  console.log("Getting private key from Web3Auth...");
+
+  const web3authProvider = web3auth.provider || (await login());
+  if (!web3authProvider) {
+    throw new Error("Web3Auth provider not available");
+  }
+
+  try {
+    // Request private key from Web3Auth provider
+    const privateKey = await web3authProvider.request({
+      method: "eth_private_key",
+    });
+
+    if (typeof privateKey === "string") {
+      console.log("Successfully retrieved private key");
+      return privateKey;
+    }
+
+    throw new Error("Failed to retrieve private key");
+  } catch (error) {
+    console.error("Error retrieving private key:", error);
+    throw new Error("Failed to get private key from Web3Auth");
+  }
 };
 
 export { web3auth };
