@@ -114,8 +114,18 @@ export const proposeTransaction = async (
     const apiKit = await initApiKit(chainId);
 
     // Create a Safe transaction
+    // IMPORTANT: For complex transactions (CCIP, MultiSend, etc), set safeTxGas explicitly
+    // This ensures Safe allocates enough gas for execution
     const safeTransaction = await safe.createTransaction({
       transactions: [txData],
+      options: {
+        safeTxGas: "500000", // Explicit gas limit for complex transactions
+        // CCIP transactions need more gas due to:
+        // 1. Complex ccipSend call
+        // 2. Token transfers
+        // 3. Fee payments
+        // Default auto-estimation may be insufficient
+      },
     });
 
     console.log("📊 Safe transaction created:", {
@@ -262,6 +272,8 @@ export const executeTransaction = async (
     }
 
     // Create Safe transaction object with exact same parameters as when proposed
+    // IMPORTANT: For complex transactions (like CCIP), we need to set safeTxGas explicitly
+    // to ensure enough gas is allocated for execution
     const safeTransaction = await safe.createTransaction({
       transactions: [
         {
@@ -271,6 +283,11 @@ export const executeTransaction = async (
           operation: transaction.operation,
         },
       ],
+      options: {
+        safeTxGas: "500000", // Set explicit gas limit for complex transactions (CCIP needs more gas)
+        // Note: This is the gas allocated for the Safe transaction execution
+        // not the total gas limit of the transaction
+      },
     });
 
     // Debug: Log confirmations before sorting
@@ -1092,6 +1109,7 @@ export const proposeCCIPTransfer = async (
   estimatedFee: CCIPFeeEstimate;
   needsApproval: boolean;
   approvalTxHash?: string;
+  ccipTxHash?: string;
 }> => {
   try {
     // Build CCIP transaction(s)
@@ -1109,9 +1127,10 @@ export const proposeCCIPTransfer = async (
     // IMPORTANT: We cannot batch approval + CCIP send because Safe uses MultiSend with DelegateCall
     // which doesn't work with ERC20 token approvals (storage context issue)
     //
-    // Solution: Propose transactions separately
-    // 1. If approval needed: propose approval first
-    // 2. Then propose CCIP send (user must execute approval before this)
+    // Solution: Propose BOTH transactions separately
+    // 1. Propose approval transaction first
+    // 2. Propose CCIP send transaction second
+    // 3. User must execute approval BEFORE executing CCIP send
 
     if (transactions.length === 1) {
       console.log("[CCIP] Single transaction - no approval needed");
@@ -1131,14 +1150,15 @@ export const proposeCCIPTransfer = async (
         safeTxHash: finalTxHash,
         estimatedFee,
         needsApproval: false,
+        ccipTxHash: finalTxHash,
       };
     } else {
       // Multiple transactions: approval + CCIP send
       console.log(
-        "[CCIP] Approval needed - proposing approval transaction first"
+        "[CCIP] Approval needed - proposing BOTH transactions sequentially"
       );
 
-      // Propose ONLY approval transaction
+      // Step 1: Propose approval transaction
       const approvalTx = transactions[0];
       const approvalTxHash = await proposeTransaction(
         safeAddress,
@@ -1151,18 +1171,39 @@ export const proposeCCIPTransfer = async (
         provider
       );
 
-      console.log("[CCIP] ✅ Approval transaction proposed:", approvalTxHash);
       console.log(
-        "[CCIP] ⚠️ User must confirm and execute this approval BEFORE proposing CCIP transfer"
+        "[CCIP] ✅ Step 1: Approval transaction proposed:",
+        approvalTxHash
       );
 
-      // Return approval transaction hash
-      // User must execute this before they can propose the CCIP send
+      // Step 2: Propose CCIP send transaction
+      const ccipTx = transactions[1];
+      const ccipTxHash = await proposeTransaction(
+        safeAddress,
+        {
+          to: ccipTx.to,
+          value: ccipTx.value,
+          data: ccipTx.data,
+          operation: ccipTx.operation,
+        },
+        provider
+      );
+
+      console.log(
+        "[CCIP] ✅ Step 2: CCIP transfer transaction proposed:",
+        ccipTxHash
+      );
+      console.log(
+        "[CCIP] ⚠️ User must execute approval transaction FIRST, then execute CCIP transfer"
+      );
+
+      // Return both transaction hashes
       return {
-        safeTxHash: approvalTxHash,
+        safeTxHash: ccipTxHash, // Main tx hash (for backward compatibility)
         estimatedFee,
         needsApproval: true,
         approvalTxHash,
+        ccipTxHash,
       };
     }
   } catch (error) {
