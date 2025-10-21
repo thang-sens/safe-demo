@@ -119,12 +119,16 @@ export const proposeTransaction = async (
     const safeTransaction = await safe.createTransaction({
       transactions: [txData],
       options: {
-        safeTxGas: "500000", // Explicit gas limit for complex transactions
-        // CCIP transactions need more gas due to:
-        // 1. Complex ccipSend call
-        // 2. Token transfers
-        // 3. Fee payments
-        // Default auto-estimation may be insufficient
+        safeTxGas: "3000000", // 3M gas for CCIP transactions
+        // CCIP transactions through Safe need significantly more gas:
+        // 1. Safe's internal execution overhead (~100k)
+        // 2. Complex ccipSend call to Router (~500k)
+        // 3. Router → FeeQuoter validation (~300k)
+        // 4. Router → TokenPool interactions (~400k)
+        // 5. OnRamp processing & event emission (~200k)
+        // 6. Multiple nested calls and state changes (~500k+)
+        // Total: ~2-2.5M gas, setting 3M for safety margin
+        // Note: This is ONLY for Safe internal accounting, actual gas used will be less
       },
     });
 
@@ -271,9 +275,8 @@ export const executeTransaction = async (
       );
     }
 
-    // Create Safe transaction object with exact same parameters as when proposed
-    // IMPORTANT: For complex transactions (like CCIP), we need to set safeTxGas explicitly
-    // to ensure enough gas is allocated for execution
+    // Create Safe transaction object with EXACT same parameters as stored in the service
+    // CRITICAL: Must match all parameters to get the same transaction hash
     const safeTransaction = await safe.createTransaction({
       transactions: [
         {
@@ -284,9 +287,13 @@ export const executeTransaction = async (
         },
       ],
       options: {
-        safeTxGas: "500000", // Set explicit gas limit for complex transactions (CCIP needs more gas)
-        // Note: This is the gas allocated for the Safe transaction execution
-        // not the total gas limit of the transaction
+        // Use the EXACT parameters from the proposed transaction
+        nonce: parseInt(transaction.nonce.toString()),
+        safeTxGas: transaction.safeTxGas?.toString() || "0",
+        baseGas: transaction.baseGas?.toString() || "0",
+        gasPrice: transaction.gasPrice?.toString() || "0",
+        gasToken: transaction.gasToken || "0x0000000000000000000000000000000000000000",
+        refundReceiver: transaction.refundReceiver || "0x0000000000000000000000000000000000000000",
       },
     });
 
@@ -373,15 +380,28 @@ export const executeTransaction = async (
       );
     }
 
-    // Execute the transaction
-    const executeTxResponse = await safe.executeTransaction(safeTransaction);
+    // Execute the transaction with sufficient gas limit
+    // CRITICAL: For CCIP transactions, we need to set a HIGH gas limit
+    // Safe's internal safeTxGas (3M) is for internal accounting
+    // But blockchain transaction needs actual gas limit (5M for CCIP)
+    console.log("⛽ Executing with high gas limit for CCIP compatibility...");
+    
+    const executeTxResponse = await safe.executeTransaction(safeTransaction, {
+      gasLimit: "5000000", // 5M gas for blockchain transaction
+      // This ensures the EVM has enough gas to complete:
+      // 1. Safe's execTransaction logic (~100k)
+      // 2. CCIP Router's ccipSend (~2-2.5M)
+      // 3. All nested calls and state changes (~500k+)
+      // 4. Buffer for network variations (~1M+)
+    });
+    
     const txResponse = executeTxResponse.transactionResponse as unknown as {
       wait: () => Promise<{ hash: string }>;
     } | null;
     const receipt = txResponse ? await txResponse.wait() : null;
 
     console.log(
-      "Transaction executed successfully:",
+      "✅ Transaction executed successfully:",
       receipt?.hash || executeTxResponse.hash
     );
     return receipt?.hash || executeTxResponse.hash || "";
@@ -606,6 +626,7 @@ export const getTransactionHistory = async (
   try {
     const apiKit = await initApiKit(chainId);
     const history = await apiKit.getMultisigTransactions(safeAddress);
+    console.log("Transaction history fetched, total txs:", history);
 
     return history.results.map((tx: SafeApiTransaction) => ({
       safeTxHash: tx.safeTxHash,
@@ -946,27 +967,26 @@ export const buildCCIPSafeTransaction = async (
     // Prepare transactions array (may need approval + CCIP send)
     const transactions: MetaTransactionData[] = [];
 
-    // Create viem clients for CCIP SDK
-    const sourceChain = getViemChain(params.sourceNetwork);
-    const publicClient = createPublicClient({
-      chain: sourceChain,
-      transport: http(sourceConfig.rpcUrl),
-    });
-
-    const ccipClient = createClient();
-
-    // Step 1: Check if token approval is needed using CCIP SDK
-    const currentAllowance = await ccipClient.getAllowance({
-      client: publicClient as any, // Type cast to avoid viem version conflicts
-      routerAddress: sourceConfig.routerAddress as `0x${string}`,
-      tokenAddress: token.address as `0x${string}`,
-      account: safeAddress as `0x${string}`,
-    });
+    // Step 1: Check if token approval is needed using DIRECT blockchain call
+    // CRITICAL: Always check fresh on-chain data, don't trust cache
+    const tokenContract = new ethers.Contract(
+      token.address,
+      IERC20ABI,
+      provider
+    );
+    
+    const currentAllowance = await tokenContract.allowance(
+      safeAddress,
+      sourceConfig.routerAddress
+    ) as bigint;
 
     const amountBN = BigInt(params.amount);
 
     console.log(
-      `[CCIP Build] Current allowance: ${currentAllowance}, needed: ${amountBN}`
+      `[CCIP Build] ⚡ FRESH allowance check from blockchain: ${currentAllowance.toString()}, needed: ${amountBN.toString()}`
+    );
+    console.log(
+      `[CCIP Build] Safe: ${safeAddress}, Router: ${sourceConfig.routerAddress}, Token: ${token.address}`
     );
 
     // If allowance is insufficient, add approval transaction

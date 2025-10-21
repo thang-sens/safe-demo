@@ -15,6 +15,15 @@ import {
   checkCCIPTransferStatus,
 } from "../lib/safeFlow";
 import type { CCIPTransferParams, CCIPFeeEstimate } from "../lib/safeFlow";
+import {
+  debugCCIPSafeTransfer,
+  verifyCCIPTransactionOnChain,
+} from "../lib/ccipDebug";
+import {
+  checkApprovalStatus,
+  analyzeSafeTransactionFailure,
+  checkSafeCCIPReadiness,
+} from "../lib/ccipSafeDebug";
 
 interface CCIPTransferProps {
   safeAddress: string;
@@ -45,6 +54,65 @@ export default function CCIPTransfer({
   const [messageStatus, setMessageStatus] = useState<{
     status: string;
     explorerUrl?: string;
+  } | null>(null);
+
+  // Verification state
+  const [verifyTxHash, setVerifyTxHash] = useState<string>("");
+  const [verificationResult, setVerificationResult] = useState<{
+    success: boolean;
+    message: string;
+    ccipMessageId?: string;
+    explorerUrl?: string;
+    diagnostics?: {
+      blockchainTxSuccess: boolean;
+      safeExecutionSuccess: boolean;
+      hasCCIPEvent: boolean;
+      hasExecutionFailure: boolean;
+      etherscanUrl: string;
+    };
+  } | null>(null);
+
+  // Approval check state
+  const [approvalCheckResult, setApprovalCheckResult] = useState<{
+    isApproved: boolean;
+    currentAllowance: string;
+    currentAllowanceFormatted: string;
+    routerAddress: string;
+    tokenAddress: string;
+    recommendation: string;
+  } | null>(null);
+
+  // Readiness check state
+  const [readinessCheckResult, setReadinessCheckResult] = useState<{
+    isReady: boolean;
+    checks: {
+      hasTokenBalance: boolean;
+      tokenBalance: string;
+      tokenBalanceFormatted: string;
+      hasNativeBalance: boolean;
+      nativeBalance: string;
+      nativeBalanceFormatted: string;
+      isTokenApproved: boolean;
+      approvalAmount: string;
+      approvalAmountFormatted: string;
+    };
+    issues: string[];
+    recommendations: string[];
+  } | null>(null);
+
+  // Transaction analysis state
+  const [analyzeTxHash, setAnalyzeTxHash] = useState<string>("");
+  const [analysisResult, setAnalysisResult] = useState<{
+    blockchainTxSuccess: boolean;
+    safeExecutionSuccess: boolean;
+    failureReason: string;
+    diagnostics: {
+      hasExecutionFailure: boolean;
+      hasCCIPEvent: boolean;
+      gasUsed: string;
+      etherscanUrl: string;
+    };
+    recommendation: string;
   } | null>(null);
 
   // Form state
@@ -166,6 +234,16 @@ export default function CCIPTransfer({
     return true;
   };
 
+  // Validate form WITHOUT setting error (for use in render/disabled checks)
+  const isFormValid = (checkFee: boolean): boolean => {
+    if (!formData.destinationNetwork) return false;
+    if (!formData.tokenSymbol) return false;
+    if (!formData.amount || parseFloat(formData.amount) <= 0) return false;
+    if (!formData.recipientAddress || !ethers.isAddress(formData.recipientAddress)) return false;
+    if (checkFee && !feeEstimate) return false;
+    return true;
+  };
+
   // Propose CCIP transfer
   const handleProposeTransfer = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -263,6 +341,101 @@ export default function CCIPTransfer({
     }
   };
 
+  // Verify CCIP transaction was actually executed on-chain
+  const handleVerifyTransaction = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setError("");
+    setSuccess("");
+    setVerificationResult(null);
+
+    if (!verifyTxHash.trim()) {
+      setError("Please enter a transaction hash to verify");
+      return;
+    }
+
+    setLoading(true);
+
+    try {
+      const result = await verifyCCIPTransactionOnChain(verifyTxHash, provider);
+      setVerificationResult(result);
+
+      if (result.success && result.ccipMessageId) {
+        setCcipMessageId(result.ccipMessageId);
+        setSuccess(
+          `✅ CCIP Transfer Verified!\n\nMessage ID: ${result.ccipMessageId}\n\nTrack on CCIP Explorer: ${result.explorerUrl}`
+        );
+      } else {
+        setError(`❌ ${result.message}`);
+      }
+    } catch (err) {
+      const errorMessage =
+        err instanceof Error
+          ? err.message
+          : "Failed to verify CCIP transaction";
+      setError(errorMessage);
+      console.error("Error verifying transaction:", err);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  // Debug: Check Safe balance and approval before proposing
+  const handleDebugBalance = async () => {
+    if (!validateForm(true)) return;
+
+    setLoading(true);
+    setError("");
+    setSuccess("");
+
+    try {
+      const token = supportedTokens.find(
+        (t) => t.symbol === formData.tokenSymbol
+      );
+      if (!token) {
+        throw new Error("Token not found");
+      }
+
+      const amountInSmallestUnit = ethers
+        .parseUnits(formData.amount, token.decimals)
+        .toString();
+
+      const debugResult = await debugCCIPSafeTransfer(
+        safeAddress,
+        formData.tokenSymbol,
+        amountInSmallestUnit,
+        sourceNetwork,
+        formData.destinationNetwork as NetworkName,
+        feeEstimate!.feeInWei,
+        provider
+      );
+
+      if (debugResult.allChecksPass) {
+        setSuccess(
+          `✅ All checks passed!\n\n` +
+            `Safe ETH Balance: ${debugResult.balanceCheck.safeBalanceEth} ETH\n` +
+            `Fee Required: ${debugResult.balanceCheck.feeRequiredEth} ETH\n` +
+            (debugResult.approvalCheck
+              ? `Token Approval: ${debugResult.approvalCheck.currentAllowanceFormatted} ${formData.tokenSymbol}\n`
+              : "") +
+            `\nSafe is ready to execute CCIP transfer!`
+        );
+      } else {
+        setError(
+          `❌ Pre-flight checks failed:\n\n${debugResult.issues.join("\n\n")}\n\n` +
+            `Current Safe ETH Balance: ${debugResult.balanceCheck.safeBalanceEth} ETH\n` +
+            `Fee Required: ${debugResult.balanceCheck.feeRequiredEth} ETH`
+        );
+      }
+    } catch (err) {
+      const errorMessage =
+        err instanceof Error ? err.message : "Failed to debug balance";
+      setError(errorMessage);
+      console.error("Error debugging balance:", err);
+    } finally {
+      setLoading(false);
+    }
+  };
+
   // Track CCIP message by transaction hash
   const handleTrackMessage = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -298,6 +471,158 @@ export default function CCIPTransfer({
         err instanceof Error ? err.message : "Failed to track message";
       setError(errorMessage);
       console.error("Error tracking message:", err);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  // NEW: Check if token is approved before executing
+  const handleCheckApproval = async () => {
+    if (!formData.tokenSymbol) {
+      setError("Please select a token first");
+      return;
+    }
+
+    setLoading(true);
+    setError("");
+    setSuccess("");
+
+    try {
+      const result = await checkApprovalStatus(
+        safeAddress,
+        formData.tokenSymbol,
+        sourceNetwork,
+        provider
+      );
+
+      setApprovalCheckResult(result);
+
+      if (result.isApproved) {
+        setSuccess(
+          `✅ Token Approved!\n\n` +
+            `${result.recommendation}\n\n` +
+            `Router: ${result.routerAddress}\n` +
+            `Token: ${result.tokenAddress}`
+        );
+      } else {
+        setError(
+          `❌ Token NOT Approved!\n\n` +
+            `${result.recommendation}\n\n` +
+            `You must execute the APPROVAL transaction first!\n\n` +
+            `Steps:\n` +
+            `1. Go to "Pending Transactions" tab\n` +
+            `2. Find the approval transaction (to: ${formData.tokenSymbol} Token)\n` +
+            `3. Execute it BEFORE executing CCIP send\n\n` +
+            `Router: ${result.routerAddress}\n` +
+            `Token: ${result.tokenAddress}`
+        );
+      }
+    } catch (err) {
+      const errorMessage =
+        err instanceof Error ? err.message : "Failed to check approval";
+      setError(errorMessage);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  // NEW: Full readiness check before execution
+  const handleCheckReadiness = async () => {
+    if (!validateForm(true)) return;
+
+    setLoading(true);
+    setError("");
+    setSuccess("");
+
+    try {
+      const token = supportedTokens.find(
+        (t) => t.symbol === formData.tokenSymbol
+      );
+      if (!token) {
+        throw new Error("Token not found");
+      }
+
+      const result = await checkSafeCCIPReadiness(
+        safeAddress,
+        formData.tokenSymbol,
+        formData.amount,
+        sourceNetwork,
+        formData.destinationNetwork as NetworkName,
+        provider
+      );
+
+      setReadinessCheckResult(result);
+
+      if (result.isReady) {
+        setSuccess(
+          `✅ Safe is READY for CCIP Transfer!\n\n` +
+            `✓ Token Balance: ${result.checks.tokenBalanceFormatted} ${formData.tokenSymbol}\n` +
+            `✓ ETH Balance: ${result.checks.nativeBalanceFormatted} ETH\n` +
+            `✓ Token Approved: ${result.checks.approvalAmountFormatted} ${formData.tokenSymbol}\n\n` +
+            `You can now execute the CCIP transfer transaction!`
+        );
+      } else {
+        setError(
+          `❌ Safe NOT Ready!\n\n` +
+            `Issues Found:\n${result.issues.map((issue, i) => `${i + 1}. ${issue}`).join("\n")}\n\n` +
+            `Recommendations:\n${result.recommendations.map((rec, i) => `${i + 1}. ${rec}`).join("\n")}\n\n` +
+            `Current Status:\n` +
+            `- Token Balance: ${result.checks.tokenBalanceFormatted} ${formData.tokenSymbol}\n` +
+            `- ETH Balance: ${result.checks.nativeBalanceFormatted} ETH\n` +
+            `- Token Approved: ${result.checks.approvalAmountFormatted} ${formData.tokenSymbol}`
+        );
+      }
+    } catch (err) {
+      const errorMessage =
+        err instanceof Error ? err.message : "Failed to check readiness";
+      setError(errorMessage);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  // NEW: Analyze a failed transaction
+  const handleAnalyzeTransaction = async (e: React.FormEvent) => {
+    e.preventDefault();
+
+    if (!analyzeTxHash) {
+      setError("Please enter a transaction hash");
+      return;
+    }
+
+    setLoading(true);
+    setError("");
+    setSuccess("");
+
+    try {
+      const result = await analyzeSafeTransactionFailure(
+        analyzeTxHash,
+        provider
+      );
+
+      setAnalysisResult(result);
+
+      const statusEmoji = result.blockchainTxSuccess
+        ? result.safeExecutionSuccess
+          ? "✅"
+          : "⚠️"
+        : "❌";
+
+      setSuccess(
+        `${statusEmoji} Transaction Analysis\n\n` +
+          `Blockchain Success: ${result.blockchainTxSuccess ? "✅" : "❌"}\n` +
+          `Safe Execution Success: ${result.safeExecutionSuccess ? "✅" : "❌"}\n` +
+          `Has CCIP Event: ${result.diagnostics.hasCCIPEvent ? "✅" : "❌"}\n` +
+          `Has Execution Failure: ${result.diagnostics.hasExecutionFailure ? "✅" : "❌"}\n\n` +
+          `Failure Reason:\n${result.failureReason}\n\n` +
+          `Recommendation:\n${result.recommendation}\n\n` +
+          `Gas Used: ${result.diagnostics.gasUsed}\n` +
+          `Etherscan: ${result.diagnostics.etherscanUrl}`
+      );
+    } catch (err) {
+      const errorMessage =
+        err instanceof Error ? err.message : "Failed to analyze transaction";
+      setError(errorMessage);
     } finally {
       setLoading(false);
     }
@@ -483,6 +808,22 @@ export default function CCIPTransfer({
                   : "✗ Insufficient balance for fees"}
               </p>
             )}
+
+            {/* Debug Balance Button */}
+            <button
+              type="button"
+              onClick={handleDebugBalance}
+              disabled={loading}
+              className="secondary"
+              style={{
+                marginTop: "1rem",
+                backgroundColor: "#17a2b8",
+                color: "white",
+                border: "none",
+              }}
+            >
+              {loading ? "Checking..." : "🔍 Debug: Check Safe Balance"}
+            </button>
           </div>
         )}
 
@@ -653,6 +994,312 @@ export default function CCIPTransfer({
         }
       `}</style>
 
+      {/* NEW: Pre-Execution Checks Section */}
+      <div className="tracking-section">
+        <h3>
+          <svg
+            width="24"
+            height="24"
+            viewBox="0 0 24 24"
+            fill="none"
+            style={{ marginRight: "8px", verticalAlign: "middle" }}
+          >
+            <path
+              d="M9 12L11 14L15 10M21 12C21 16.9706 16.9706 21 12 21C7.02944 21 3 16.9706 3 12C3 7.02944 7.02944 3 12 3C16.9706 3 21 7.02944 21 12Z"
+              stroke="currentColor"
+              strokeWidth="2"
+              strokeLinecap="round"
+              strokeLinejoin="round"
+            />
+          </svg>
+          Pre-Execution Checks
+        </h3>
+        <p className="info-text">
+          ⚠️ Before executing CCIP transfer, check if everything is ready!
+        </p>
+
+        <div style={{ display: "flex", gap: "1rem", marginBottom: "1.5rem" }}>
+          <button
+            type="button"
+            onClick={handleCheckApproval}
+            disabled={loading || !formData.tokenSymbol}
+            style={{
+              flex: 1,
+              padding: "0.75rem",
+              backgroundColor: "#ffc107",
+              color: "black",
+              border: "none",
+              borderRadius: "8px",
+              fontWeight: "500",
+              cursor: loading ? "not-allowed" : "pointer",
+            }}
+          >
+            {loading ? "Checking..." : "🔍 Check Token Approval"}
+          </button>
+
+          <button
+            type="button"
+            onClick={handleCheckReadiness}
+            disabled={loading || !isFormValid(false)}
+            style={{
+              flex: 1,
+              padding: "0.75rem",
+              backgroundColor: "#28a745",
+              color: "white",
+              border: "none",
+              borderRadius: "8px",
+              fontWeight: "500",
+              cursor: loading ? "not-allowed" : "pointer",
+            }}
+          >
+            {loading ? "Checking..." : "✅ Full Readiness Check"}
+          </button>
+        </div>
+
+        <div
+          style={{
+            backgroundColor: "#fff3cd",
+            border: "1px solid #ffc107",
+            borderRadius: "8px",
+            padding: "1rem",
+            marginBottom: "1rem",
+          }}
+        >
+          <p style={{ margin: 0, fontSize: "0.875rem", lineHeight: "1.5" }}>
+            <strong>⚠️ IMPORTANT:</strong> When CCIP transfer needs approval,
+            TWO transactions are proposed:
+            <br />
+            <br />
+            1️⃣ <strong>Approval Transaction</strong> - Must execute FIRST
+            <br />
+            2️⃣ <strong>CCIP Transfer Transaction</strong> - Execute AFTER
+            approval
+            <br />
+            <br />
+            Use these checks to verify approval status before executing!
+          </p>
+        </div>
+      </div>
+
+      {/* NEW: Transaction Analysis Section */}
+      <div className="tracking-section">
+        <h3>
+          <svg
+            width="24"
+            height="24"
+            viewBox="0 0 24 24"
+            fill="none"
+            style={{ marginRight: "8px", verticalAlign: "middle" }}
+          >
+            <path
+              d="M9 5H7C5.89543 5 5 5.89543 5 7V19C5 20.1046 5.89543 21 7 21H17C18.1046 21 19 20.1046 19 19V7C19 5.89543 18.1046 5 17 5H15M9 5C9 6.10457 9.89543 7 11 7H13C14.1046 7 15 6.10457 15 5M9 5C9 3.89543 9.89543 3 11 3H13C14.1046 3 15 3.89543 15 5M12 12H15M12 16H15M9 12H9.01M9 16H9.01"
+              stroke="currentColor"
+              strokeWidth="2"
+              strokeLinecap="round"
+              strokeLinejoin="round"
+            />
+          </svg>
+          Analyze Failed Transaction
+        </h3>
+        <p className="info-text">
+          If your CCIP transfer failed (isSuccessful: false), analyze it here to
+          find the exact cause!
+        </p>
+
+        <form onSubmit={handleAnalyzeTransaction}>
+          <div className="form-group">
+            <label>Transaction Hash</label>
+            <input
+              type="text"
+              placeholder="0x..."
+              value={analyzeTxHash}
+              onChange={(e) => setAnalyzeTxHash(e.target.value)}
+              disabled={loading}
+            />
+          </div>
+
+          <button
+            type="submit"
+            disabled={loading || !analyzeTxHash}
+            style={{
+              width: "100%",
+              padding: "0.75rem",
+              backgroundColor: "#dc3545",
+              color: "white",
+              border: "none",
+              borderRadius: "8px",
+              fontWeight: "500",
+              cursor: loading ? "not-allowed" : "pointer",
+            }}
+          >
+            {loading ? "Analyzing..." : "🔍 Analyze Transaction"}
+          </button>
+        </form>
+      </div>
+
+      {/* CCIP Transaction Verification Section */}
+      <div className="tracking-section">
+        <h3>
+          <svg
+            width="24"
+            height="24"
+            viewBox="0 0 24 24"
+            fill="none"
+            style={{ marginRight: "8px", verticalAlign: "middle" }}
+          >
+            <path
+              d="M9 12L11 14L15 10M21 12C21 16.9706 16.9706 21 12 21C7.02944 21 3 16.9706 3 12C3 7.02944 7.02944 3 12 3C16.9706 3 21 7.02944 21 12Z"
+              stroke="currentColor"
+              strokeWidth="2"
+              strokeLinecap="round"
+              strokeLinejoin="round"
+            />
+          </svg>
+          ⚠️ Verify CCIP Transaction
+        </h3>
+
+        <div
+          className="info-text"
+          style={{
+            backgroundColor: "#fff3cd",
+            border: "1px solid #ffc107",
+            borderRadius: "4px",
+            padding: "1rem",
+            marginBottom: "1rem",
+          }}
+        >
+          <strong>⚠️ IMPORTANT: Use This First!</strong>
+          <p style={{ marginTop: "0.5rem", marginBottom: 0 }}>
+            After executing a CCIP transfer through Safe, use this verification
+            tool to confirm the CCIP message was actually sent on-chain. This
+            will check if the transaction contains a CCIP message ID.
+          </p>
+        </div>
+
+        <form onSubmit={handleVerifyTransaction}>
+          <div className="form-group">
+            <label htmlFor="verifyTxHash">
+              Transaction Hash (from executed Safe transaction)
+            </label>
+            <input
+              type="text"
+              id="verifyTxHash"
+              placeholder="0x..."
+              value={verifyTxHash}
+              onChange={(e) => setVerifyTxHash(e.target.value)}
+            />
+            <small>
+              Enter the blockchain transaction hash after executing your CCIP
+              transfer
+            </small>
+          </div>
+
+          <button
+            type="submit"
+            className="primary"
+            disabled={loading || !verifyTxHash.trim()}
+            style={{ backgroundColor: "#28a745" }}
+          >
+            {loading ? "Verifying..." : "✓ Verify CCIP Transaction"}
+          </button>
+        </form>
+
+        {verificationResult && (
+          <div
+            className="tracking-result"
+            style={{
+              backgroundColor: verificationResult.success
+                ? "#d4edda"
+                : "#f8d7da",
+              border: `1px solid ${verificationResult.success ? "#c3e6cb" : "#f5c6cb"}`,
+            }}
+          >
+            <p
+              style={{
+                fontWeight: "bold",
+                color: verificationResult.success ? "#155724" : "#721c24",
+              }}
+            >
+              {verificationResult.success ? "✅ Success!" : "❌ Failed"}
+            </p>
+            <p style={{ whiteSpace: "pre-wrap" }}>
+              {verificationResult.message}
+            </p>
+
+            {/* Diagnostics Info */}
+            {verificationResult.diagnostics && (
+              <div
+                style={{
+                  marginTop: "1rem",
+                  padding: "0.75rem",
+                  backgroundColor: "rgba(0,0,0,0.05)",
+                  borderRadius: "4px",
+                  fontSize: "0.875rem",
+                }}
+              >
+                <p style={{ fontWeight: "bold", marginBottom: "0.5rem" }}>
+                  📊 Diagnostics:
+                </p>
+                <ul style={{ margin: 0, paddingLeft: "1.5rem" }}>
+                  <li>
+                    Blockchain TX:{" "}
+                    {verificationResult.diagnostics.blockchainTxSuccess
+                      ? "✅ Success"
+                      : "❌ Failed"}
+                  </li>
+                  <li>
+                    Safe Execution:{" "}
+                    {verificationResult.diagnostics.safeExecutionSuccess
+                      ? "✅ Success"
+                      : "❌ Failed"}
+                  </li>
+                  <li>
+                    CCIP Event Found:{" "}
+                    {verificationResult.diagnostics.hasCCIPEvent
+                      ? "✅ Yes"
+                      : "❌ No"}
+                  </li>
+                </ul>
+                <p style={{ marginTop: "0.5rem", marginBottom: 0 }}>
+                  <a
+                    href={verificationResult.diagnostics.etherscanUrl}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    style={{ color: "#007bff" }}
+                  >
+                    🔗 View on Etherscan →
+                  </a>
+                </p>
+              </div>
+            )}
+
+            {verificationResult.ccipMessageId && (
+              <div style={{ marginTop: "1rem" }}>
+                <p>
+                  <strong>CCIP Message ID:</strong>
+                </p>
+                <div className="message-id">
+                  {verificationResult.ccipMessageId}
+                </div>
+
+                {verificationResult.explorerUrl && (
+                  <p style={{ marginTop: "1rem" }}>
+                    <a
+                      href={verificationResult.explorerUrl}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      style={{ color: "#007bff" }}
+                    >
+                      🔗 View on CCIP Explorer →
+                    </a>
+                  </p>
+                )}
+              </div>
+            )}
+          </div>
+        )}
+      </div>
+
       {/* CCIP Message Tracking Section */}
       <div className="tracking-section">
         <h3>
@@ -674,8 +1321,8 @@ export default function CCIPTransfer({
         </h3>
 
         <p className="info-text">
-          After executing a CCIP transfer, track its status using the
-          transaction hash from the executed Safe transaction.
+          If verification succeeded, you can also track the CCIP transfer
+          status using the transaction hash.
         </p>
 
         <form onSubmit={handleTrackMessage}>
