@@ -239,7 +239,11 @@ export default function CCIPTransfer({
     if (!formData.destinationNetwork) return false;
     if (!formData.tokenSymbol) return false;
     if (!formData.amount || parseFloat(formData.amount) <= 0) return false;
-    if (!formData.recipientAddress || !ethers.isAddress(formData.recipientAddress)) return false;
+    if (
+      !formData.recipientAddress ||
+      !ethers.isAddress(formData.recipientAddress)
+    )
+      return false;
     if (checkFee && !feeEstimate) return false;
     return true;
   };
@@ -421,7 +425,9 @@ export default function CCIPTransfer({
         );
       } else {
         setError(
-          `❌ Pre-flight checks failed:\n\n${debugResult.issues.join("\n\n")}\n\n` +
+          `❌ Pre-flight checks failed:\n\n${debugResult.issues.join(
+            "\n\n"
+          )}\n\n` +
             `Current Safe ETH Balance: ${debugResult.balanceCheck.safeBalanceEth} ETH\n` +
             `Fee Required: ${debugResult.balanceCheck.feeRequiredEth} ETH`
         );
@@ -564,8 +570,12 @@ export default function CCIPTransfer({
       } else {
         setError(
           `❌ Safe NOT Ready!\n\n` +
-            `Issues Found:\n${result.issues.map((issue, i) => `${i + 1}. ${issue}`).join("\n")}\n\n` +
-            `Recommendations:\n${result.recommendations.map((rec, i) => `${i + 1}. ${rec}`).join("\n")}\n\n` +
+            `Issues Found:\n${result.issues
+              .map((issue, i) => `${i + 1}. ${issue}`)
+              .join("\n")}\n\n` +
+            `Recommendations:\n${result.recommendations
+              .map((rec, i) => `${i + 1}. ${rec}`)
+              .join("\n")}\n\n` +
             `Current Status:\n` +
             `- Token Balance: ${result.checks.tokenBalanceFormatted} ${formData.tokenSymbol}\n` +
             `- ETH Balance: ${result.checks.nativeBalanceFormatted} ETH\n` +
@@ -611,9 +621,13 @@ export default function CCIPTransfer({
       setSuccess(
         `${statusEmoji} Transaction Analysis\n\n` +
           `Blockchain Success: ${result.blockchainTxSuccess ? "✅" : "❌"}\n` +
-          `Safe Execution Success: ${result.safeExecutionSuccess ? "✅" : "❌"}\n` +
+          `Safe Execution Success: ${
+            result.safeExecutionSuccess ? "✅" : "❌"
+          }\n` +
           `Has CCIP Event: ${result.diagnostics.hasCCIPEvent ? "✅" : "❌"}\n` +
-          `Has Execution Failure: ${result.diagnostics.hasExecutionFailure ? "✅" : "❌"}\n\n` +
+          `Has Execution Failure: ${
+            result.diagnostics.hasExecutionFailure ? "✅" : "❌"
+          }\n\n` +
           `Failure Reason:\n${result.failureReason}\n\n` +
           `Recommendation:\n${result.recommendation}\n\n` +
           `Gas Used: ${result.diagnostics.gasUsed}\n` +
@@ -1211,7 +1225,9 @@ export default function CCIPTransfer({
               backgroundColor: verificationResult.success
                 ? "#d4edda"
                 : "#f8d7da",
-              border: `1px solid ${verificationResult.success ? "#c3e6cb" : "#f5c6cb"}`,
+              border: `1px solid ${
+                verificationResult.success ? "#c3e6cb" : "#f5c6cb"
+              }`,
             }}
           >
             <p
@@ -1321,8 +1337,8 @@ export default function CCIPTransfer({
         </h3>
 
         <p className="info-text">
-          If verification succeeded, you can also track the CCIP transfer
-          status using the transaction hash.
+          If verification succeeded, you can also track the CCIP transfer status
+          using the transaction hash.
         </p>
 
         <form onSubmit={handleTrackMessage}>
