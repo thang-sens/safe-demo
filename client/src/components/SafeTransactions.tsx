@@ -16,6 +16,7 @@ import { getSafeInfo, getChainId } from "../lib/safe";
 import { syncCompanyData } from "../lib/api";
 import CCIPTransfer from "./CCIPTransfer";
 import DirectCCIPTransfer from "./DirectCCIPTransfer";
+import TokenApproval from "./TokenApproval";
 
 interface SafeTransactionsProps {
   safeAddress: string;
@@ -42,7 +43,7 @@ export default function SafeTransactions({
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string>("");
   const [activeTab, setActiveTab] = useState<
-    "transactions" | "ccip" | "direct-ccip" | "owners"
+    "transactions" | "ccip" | "direct-ccip" | "owners" | "approvals"
   >("transactions");
 
   // Form states
@@ -409,6 +410,30 @@ export default function SafeTransactions({
           </svg>
           Owner Management
         </button>
+        <button
+          className={
+            activeTab === "approvals" ? "tab-button active" : "tab-button"
+          }
+          onClick={() => setActiveTab("approvals")}
+        >
+          <svg
+            width="20"
+            height="20"
+            viewBox="0 0 20 20"
+            fill="none"
+            style={{ marginRight: "6px" }}
+          >
+            <path
+              d="M9 12L11 14L15 10M21 12C21 16.9706 16.9706 21 12 21C7.02944 21 3 16.9706 3 12C3 7.02944 7.02944 3 12 3C16.9706 3 21 7.02944 21 12Z"
+              stroke="currentColor"
+              strokeWidth="2"
+              strokeLinecap="round"
+              strokeLinejoin="round"
+              transform="scale(0.83)"
+            />
+          </svg>
+          Token Approvals
+        </button>
       </div>
 
       {/* Safe Info */}
@@ -702,6 +727,15 @@ export default function SafeTransactions({
             </button>
           </form>
         </div>
+      )}
+
+      {/* Token Approval Tab Content */}
+      {activeTab === "approvals" && (
+        <TokenApproval
+          safeAddress={safeAddress}
+          provider={provider}
+          onSuccess={loadSafeData}
+        />
       )}
 
       <style>{`

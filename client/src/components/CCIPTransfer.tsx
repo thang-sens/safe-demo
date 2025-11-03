@@ -360,32 +360,61 @@ export default function CCIPTransfer({
       );
 
       if (result.needsApproval) {
-        // Batched transaction with approval included
-        setSuccess(
-          `✅ Batched CCIP Transaction Proposed! 🎉\n\n` +
-            `Transaction Hash: ${result.safeTxHash.substring(0, 20)}...\n\n` +
-            `🔥 NEW: All operations batched into ONE transaction!\n` +
-            `This transaction includes:\n` +
-            `  1. Token approval (for transfer amount)\n` +
-            (feeToken === "LINK"
-              ? `  2. LINK approval (for fee payment)\n`
-              : "") +
-            `  ${
-              feeToken === "LINK" ? "3" : "2"
-            }. CCIP cross-chain transfer\n\n` +
-            `✅ Advantages:\n` +
-            `  • Single execution (no nonce conflicts!)\n` +
-            `  • Atomic operations (all succeed or all fail)\n` +
-            `  • Simpler workflow (one click execute)\n\n` +
-            `Next Steps:\n` +
-            `1. Go to "Pending Transactions" tab\n` +
-            `2. Find the batched transaction (MultiSend)\n` +
-            `3. Confirm with other owners (if needed)\n` +
-            `4. Execute ONCE to run all operations! 🚀\n\n` +
-            `After execution, track your transfer below.`
-        );
+        // Check if we used native fee (separate transactions) or LINK fee (batched)
+        const usedNativeFee = feeToken === "native";
 
-        // Clear saved transfer (not needed anymore)
+        if (usedNativeFee) {
+          // NATIVE FEE: Separate transactions (approval + ccipSend)
+          setSuccess(
+            `✅ CCIP Transactions Proposed! 🎉\n\n` +
+              `⚠️ NATIVE FEE MODE: Transactions proposed SEPARATELY\n\n` +
+              `📋 Transaction 1 (Approval):\n` +
+              `   Hash: ${result.approvalTxHash?.substring(0, 20)}...\n` +
+              `   Purpose: Approve ${formData.tokenSymbol} transfer\n\n` +
+              `📋 Transaction 2 (CCIP Send):\n` +
+              `   Hash: ${result.ccipTxHash?.substring(0, 20)}...\n` +
+              `   Purpose: Cross-chain transfer with ${ethers.formatEther(
+                feeEstimate!.feeInWei
+              )} ETH fee\n\n` +
+              `⚠️ IMPORTANT - Execute IN ORDER:\n` +
+              `1. Go to "Pending Transactions" tab\n` +
+              `2. Execute Transaction 1 (Approval) FIRST\n` +
+              `3. Wait for confirmation\n` +
+              `4. Then execute Transaction 2 (CCIP Send)\n\n` +
+              `💡 Why separate?\n` +
+              `Native ETH fees require msg.value, which cannot be\n` +
+              `batched in Safe's MultiSend (DELEGATECALL limitation).\n\n` +
+              `⚠️ NONCE CONFLICT WARNING:\n` +
+              `Both transactions may share the same nonce!\n` +
+              `Executing one may invalidate the other.\n\n` +
+              `🎯 BETTER SOLUTION:\n` +
+              `Go to "Token Approvals" tab and pre-approve tokens\n` +
+              `with a large allowance (e.g., 1,000,000). Then future\n` +
+              `CCIP transfers only need 1 transaction - no conflicts!\n\n` +
+              `After execution, track your transfer below.`
+          );
+        } else {
+          // LINK FEE: Batched transaction (approval + ccipSend in one)
+          setSuccess(
+            `✅ Batched CCIP Transaction Proposed! 🎉\n\n` +
+              `Transaction Hash: ${result.safeTxHash.substring(0, 20)}...\n\n` +
+              `🔥 LINK FEE MODE: All operations batched into ONE transaction!\n` +
+              `This transaction includes:\n` +
+              `  1. Token approval (for transfer amount)\n` +
+              `  2. LINK approval (for fee payment)\n` +
+              `  3. CCIP cross-chain transfer\n\n` +
+              `✅ Advantages:\n` +
+              `  • Single execution (no nonce conflicts!)\n` +
+              `  • Atomic operations (all succeed or all fail)\n` +
+              `  • Simpler workflow (one click execute)\n\n` +
+              `Next Steps:\n` +
+              `1. Go to "Pending Transactions" tab\n` +
+              `2. Find the batched transaction (MultiSend)\n` +
+              `3. Confirm with other owners (if needed)\n` +
+              `4. Execute ONCE to run all operations! 🚀\n\n` +
+              `After execution, track your transfer below.`
+          );
+        }
       } else {
         // CCIP transfer was proposed directly (no approval needed)
         setSuccess(
@@ -759,8 +788,9 @@ export default function CCIPTransfer({
           <small
             style={{ color: "#666", marginTop: "0.5rem", display: "block" }}
           >
-            ℹ️ ETH only used for gas. CCIP fees are paid in LINK token when
-            using Safe multisig
+            {feeToken === "LINK"
+              ? "ℹ️ ETH only used for gas. CCIP fees paid in LINK token."
+              : "⚠️ ETH used for both gas AND CCIP fees (native payment mode)."}
           </small>
         </div>
       )}
@@ -770,20 +800,37 @@ export default function CCIPTransfer({
           className="balance-info success"
           style={{
             marginTop: "1rem",
-            background: "#fff3e0",
-            borderLeftColor: "#ff9800",
+            background: feeToken === "LINK" ? "#fff3e0" : "#e3f2fd",
+            borderLeftColor: feeToken === "LINK" ? "#ff9800" : "#2196f3",
           }}
         >
-          <strong>💰 CCIP Fee:</strong> {feeEstimate.feeInEther} LINK
+          <strong>💰 CCIP Fee:</strong> {feeEstimate.feeInEther}{" "}
+          {feeEstimate.feeToken}
           <br />
-          <small
-            style={{ color: "#e65100", marginTop: "0.5rem", display: "block" }}
-          >
-            ⚠️ <strong>IMPORTANT:</strong> Safe must have enough LINK tokens for
-            fee payment!
-            <br />
-            Check your LINK balance before proposing the transaction.
-          </small>
+          {feeToken === "LINK" ? (
+            <small
+              style={{ color: "#e65100", marginTop: "0.5rem", display: "block" }}
+            >
+              ⚠️ <strong>IMPORTANT:</strong> Safe must have enough LINK tokens
+              for fee payment!
+              <br />
+              Check your LINK balance before proposing the transaction.
+            </small>
+          ) : (
+            <small
+              style={{ color: "#1565c0", marginTop: "0.5rem", display: "block" }}
+            >
+              ℹ️ <strong>NATIVE FEE MODE:</strong> You'll need to execute 2
+              transactions in order:
+              <br />
+              1. Token approval (no ETH value)
+              <br />
+              2. CCIP send (with {feeEstimate.feeInEther} ETH fee)
+              <br />
+              <br />
+              💡 Why? Safe's MultiSend can't forward msg.value to sub-calls.
+            </small>
+          )}
         </div>
       )}
 

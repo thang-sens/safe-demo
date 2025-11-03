@@ -1145,7 +1145,10 @@ export const buildCCIPSafeTransaction = async (
     // If token allowance is insufficient, add approval transaction
     if (currentAllowance < amountBN) {
       console.log(
-        "[CCIP Build] Insufficient token allowance - adding token approval transaction"
+        "[CCIP Build] ⚠️ Insufficient token allowance - adding token approval transaction"
+      );
+      console.log(
+        `[CCIP Build] 💡 TIP: Pre-approve tokens in "Token Approvals" tab to skip this step!`
       );
 
       const approvalData = tokenContract.interface.encodeFunctionData(
@@ -1159,6 +1162,13 @@ export const buildCCIPSafeTransaction = async (
         data: approvalData,
         operation: 0, // Call
       });
+    } else {
+      console.log(
+        "[CCIP Build] ✅ Token already approved - skipping approval transaction"
+      );
+      console.log(
+        `[CCIP Build] 🎉 This allows single-transaction CCIP transfer (even with native fees)!`
+      );
     }
 
     // Step 2: Check if LINK approval is needed for fee payment (only if using LINK)
@@ -1346,89 +1356,188 @@ export const proposeCCIPTransfer = async (
       transactions
     );
 
-    // 🔥 CRITICAL FIX: Batch ALL transactions into ONE Safe transaction
+    // � CRITICAL DECISION: Batch vs Separate based on fee token type!
     //
-    // Previous bug: Proposing transactions separately caused nonce conflicts
-    // - Both transactions had same nonce
-    // - Executing one invalidated the other
-    // - Both disappeared from pending list
+    // ✅ LINK Fees (value = "0"): CAN batch with MultiSend
+    //    - All transactions have value="0"
+    //    - MultiSend DELEGATECALL works perfectly
+    //    - Atomically executes: approval(s) + ccipSend
     //
-    // ✅ Solution: Use Safe's MultiSend to batch operations atomically
-    // - All operations batched into single Safe transaction
-    // - Single nonce for entire batch
-    // - Execute once → all operations run in sequence
+    // ❌ Native Fees (value = feeAmount): MUST propose separately!
+    //    - Last transaction has value=feeAmount
+    //    - MultiSend DELEGATECALL does NOT forward msg.value to sub-calls
+    //    - Would cause "insufficient fee" error
+    //    - Must execute approval first, then ccipSend separately
     //
-    // Myth busted: "MultiSend DELEGATECALL breaks ERC20 approvals"
-    // Reality: Works perfectly! msg.sender = Safe (preserved), approvals work
+    // See: https://docs.safe.global/advanced/smart-account-transactions
+    //      "Transactions with value must be executed individually"
 
-    console.log(
-      `[CCIP] Proposing ${transactions.length} transaction(s) as batched Safe transaction`
-    );
+    const hasValueTransaction = transactions.some((tx) => BigInt(tx.value) > 0n);
+    const useNativeFee = feeToken === "native" && hasValueTransaction;
 
-    // Initialize Protocol Kit
-    const safe = await initProtocolKit(safeAddress, provider);
-
-    // Get chain ID
-    const network = await provider.getNetwork();
-    const chainId = network.chainId.toString();
-
-    // Initialize API Kit
-    const apiKit = await initApiKit(chainId);
-
-    // Create batched Safe transaction (MultiSend if multiple txs)
-    const safeTransaction = await safe.createTransaction({
-      transactions: transactions, // Array of MetaTransactionData
-      options: {
-        safeTxGas: "3000000", // 3M gas for CCIP + approvals
-      },
-    });
-
-    console.log("[CCIP] Safe transaction created:", {
-      nonce: safeTransaction.data.nonce,
-      operations: transactions.length,
-      safeTxGas: safeTransaction.data.safeTxGas,
-    });
-
-    // Log each operation in the batch
-    transactions.forEach((tx, i) => {
+    if (useNativeFee) {
       console.log(
-        `  [${i + 1}] to: ${tx.to.substring(0, 10)}..., value: ${tx.value}`
+        `[CCIP] ⚠️ NATIVE FEE MODE: Proposing ${transactions.length} transaction(s) SEPARATELY`
       );
-    });
+      console.log(
+        `[CCIP] 💡 Reason: MultiSend cannot forward msg.value for CCIP Router fees`
+      );
 
-    // Sign the transaction
-    const signedTransaction = await safe.signTransaction(safeTransaction);
+      // Initialize Protocol Kit
+      const safe = await initProtocolKit(safeAddress, provider);
 
-    // Get the Safe transaction hash
-    const safeTxHash = await safe.getTransactionHash(signedTransaction);
+      // Get chain ID
+      const network = await provider.getNetwork();
+      const chainId = network.chainId.toString();
 
-    console.log("🔐 Safe transaction hash:", safeTxHash);
+      // Initialize API Kit
+      const apiKit = await initApiKit(chainId);
 
-    // Propose the transaction to the Safe Transaction Service
-    const senderAddress = await safe.getSafeProvider().getSignerAddress();
-    if (!senderAddress) {
-      throw new Error("Could not get signer address");
+      let approvalTxHash: string | undefined;
+      let ccipTxHash: string;
+
+      // Propose each transaction separately (preserving order)
+      for (let i = 0; i < transactions.length; i++) {
+        const tx = transactions[i];
+        const isApproval = i < transactions.length - 1; // All except last are approvals
+        const isCCIPSend = i === transactions.length - 1; // Last is CCIP send
+
+        console.log(
+          `[CCIP] Proposing transaction ${i + 1}/${transactions.length}: ${
+            isApproval ? "Approval" : "CCIP Send"
+          }`
+        );
+
+        // Create individual Safe transaction
+        const safeTransaction = await safe.createTransaction({
+          transactions: [tx], // Single transaction
+          options: {
+            safeTxGas: isCCIPSend ? "3000000" : "100000", // More gas for CCIP
+          },
+        });
+
+        console.log(`  Nonce: ${safeTransaction.data.nonce}`);
+        console.log(`  Value: ${tx.value} wei`);
+        console.log(`  To: ${tx.to.substring(0, 10)}...`);
+
+        // Sign the transaction
+        const signedTransaction = await safe.signTransaction(safeTransaction);
+
+        // Get the Safe transaction hash
+        const safeTxHash = await safe.getTransactionHash(signedTransaction);
+
+        console.log(`  Safe TX Hash: ${safeTxHash}`);
+
+        // Propose the transaction to the Safe Transaction Service
+        const senderAddress = await safe.getSafeProvider().getSignerAddress();
+        if (!senderAddress) {
+          throw new Error("Could not get signer address");
+        }
+
+        await apiKit.proposeTransaction({
+          safeAddress,
+          safeTransactionData: signedTransaction.data,
+          safeTxHash,
+          senderAddress,
+          senderSignature: signedTransaction.encodedSignatures(),
+        });
+
+        console.log(`  ✅ Transaction ${i + 1} proposed successfully`);
+
+        // Track which transaction is which
+        if (isApproval) {
+          approvalTxHash = safeTxHash;
+        } else if (isCCIPSend) {
+          ccipTxHash = safeTxHash;
+        }
+      }
+
+      console.log("[CCIP] ✅ All transactions proposed separately");
+      console.log(
+        "[CCIP] 💡 Execute IN ORDER: First approval(s), then CCIP send"
+      );
+
+      return {
+        safeTxHash: ccipTxHash!, // Return CCIP send hash as primary
+        estimatedFee,
+        needsApproval: transactions.length > 1,
+        approvalTxHash,
+        ccipTxHash: ccipTxHash!,
+      };
+    } else {
+      // LINK fee or no approvals needed - can batch safely
+      console.log(
+        `[CCIP] ✅ LINK FEE MODE: Batching ${transactions.length} transaction(s)`
+      );
+      console.log(
+        `[CCIP] 💡 Reason: No msg.value required, MultiSend works perfectly`
+      );
+
+      // Initialize Protocol Kit
+      const safe = await initProtocolKit(safeAddress, provider);
+
+      // Get chain ID
+      const network = await provider.getNetwork();
+      const chainId = network.chainId.toString();
+
+      // Initialize API Kit
+      const apiKit = await initApiKit(chainId);
+
+      // Create batched Safe transaction (MultiSend if multiple txs)
+      const safeTransaction = await safe.createTransaction({
+        transactions: transactions, // Array of MetaTransactionData
+        options: {
+          safeTxGas: "3000000", // 3M gas for CCIP + approvals
+        },
+      });
+
+      console.log("[CCIP] Safe transaction created:", {
+        nonce: safeTransaction.data.nonce,
+        operations: transactions.length,
+        safeTxGas: safeTransaction.data.safeTxGas,
+      });
+
+      // Log each operation in the batch
+      transactions.forEach((tx, i) => {
+        console.log(
+          `  [${i + 1}] to: ${tx.to.substring(0, 10)}..., value: ${tx.value}`
+        );
+      });
+
+      // Sign the transaction
+      const signedTransaction = await safe.signTransaction(safeTransaction);
+
+      // Get the Safe transaction hash
+      const safeTxHash = await safe.getTransactionHash(signedTransaction);
+
+      console.log("🔐 Safe transaction hash:", safeTxHash);
+
+      // Propose the transaction to the Safe Transaction Service
+      const senderAddress = await safe.getSafeProvider().getSignerAddress();
+      if (!senderAddress) {
+        throw new Error("Could not get signer address");
+      }
+
+      await apiKit.proposeTransaction({
+        safeAddress,
+        safeTransactionData: signedTransaction.data,
+        safeTxHash,
+        senderAddress,
+        senderSignature: signedTransaction.encodedSignatures(),
+      });
+
+      console.log("[CCIP] ✅ Batched transaction proposed:", safeTxHash);
+      console.log(
+        "[CCIP] 💡 Execute this ONE transaction to run all operations atomically"
+      );
+
+      return {
+        safeTxHash,
+        estimatedFee,
+        needsApproval: transactions.length > 1, // True if had approval
+        ccipTxHash: safeTxHash, // Same hash (batched)
+      };
     }
-
-    await apiKit.proposeTransaction({
-      safeAddress,
-      safeTransactionData: signedTransaction.data,
-      safeTxHash,
-      senderAddress,
-      senderSignature: signedTransaction.encodedSignatures(),
-    });
-
-    console.log("[CCIP] ✅ Batched transaction proposed:", safeTxHash);
-    console.log(
-      "[CCIP] 💡 Execute this ONE transaction to run all operations atomically"
-    );
-
-    return {
-      safeTxHash,
-      estimatedFee,
-      needsApproval: transactions.length > 1, // True if had approval
-      ccipTxHash: safeTxHash, // Same hash (batched)
-    };
   } catch (error) {
     console.error("Error proposing CCIP transfer:", error);
     throw error;
