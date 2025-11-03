@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { BrowserProvider, ethers } from "ethers";
 import type { NetworkName } from "../lib/ccipConfig";
 import {
@@ -47,6 +47,9 @@ export default function CCIPTransfer({
     tokenBalance: string;
     nativeBalance: string;
   } | null>(null);
+
+  // Safe balance tracking
+  const [safeEthBalance, setSafeEthBalance] = useState<string>("");
 
   // CCIP tracking state
   const [ccipMessageId, setCcipMessageId] = useState<string>("");
@@ -126,6 +129,23 @@ export default function CCIPTransfer({
   const sourceNetwork = DEFAULT_SOURCE_NETWORK;
   const destinationNetworks = getAvailableDestinationNetworks(sourceNetwork);
   const supportedTokens = getSupportedTokens(sourceNetwork);
+
+  // 🔍 Auto-load Safe ETH balance on mount and when fee changes
+  useEffect(() => {
+    const loadSafeBalance = async () => {
+      try {
+        const balance = await provider.getBalance(safeAddress);
+        setSafeEthBalance(ethers.formatEther(balance));
+      } catch (err) {
+        console.error("Failed to load Safe balance:", err);
+      }
+    };
+
+    loadSafeBalance();
+    // Reload every 10 seconds
+    const interval = setInterval(loadSafeBalance, 10000);
+    return () => clearInterval(interval);
+  }, [provider, safeAddress]);
 
   // Handle destination network change
   const handleNetworkChange = (network: string) => {
@@ -277,6 +297,41 @@ export default function CCIPTransfer({
         amount: amountInSmallestUnit,
         recipientAddress: formData.recipientAddress,
       };
+
+      // 🔍 CRITICAL: Check Safe has sufficient ETH BEFORE proposing
+      console.log("💰 Checking Safe balance before proposing CCIP transfer...");
+      const safeBalance = await provider.getBalance(safeAddress);
+      const requiredFee = BigInt(feeEstimate!.feeInWei);
+
+      console.log(`Safe Balance: ${ethers.formatEther(safeBalance)} ETH`);
+      console.log(`Required Fee: ${ethers.formatEther(requiredFee)} ETH`);
+
+      if (safeBalance < requiredFee) {
+        const shortfall = requiredFee - safeBalance;
+        throw new Error(
+          `❌ Insufficient ETH in Safe!\n\n` +
+            `Safe Balance: ${ethers.formatEther(safeBalance)} ETH\n` +
+            `Required Fee: ${ethers.formatEther(requiredFee)} ETH\n` +
+            `Shortfall: ${ethers.formatEther(shortfall)} ETH\n\n` +
+            `⚠️ Please send at least ${ethers.formatEther(
+              shortfall
+            )} ETH to Safe at:\n${safeAddress}\n\n` +
+            `Tip: Send a bit more (e.g., ${ethers.formatEther(
+              shortfall + BigInt("10000000000000000")
+            )} ETH) to cover gas variations.`
+        );
+      }
+
+      // Add buffer check (warn if less than 10% buffer)
+      const bufferAmount = requiredFee / BigInt(10); // 10% buffer
+      if (safeBalance < requiredFee + bufferAmount) {
+        console.warn(
+          `⚠️ Safe balance is close to minimum required. ` +
+            `Consider adding more ETH for gas variations.`
+        );
+      }
+
+      console.log("✅ Safe has sufficient balance, proposing transaction...");
 
       const result = await proposeCCIPTransfer(params, safeAddress, provider);
 
@@ -671,6 +726,42 @@ export default function CCIPTransfer({
       {error && <div className="error-message">{error}</div>}
       {success && <div className="success-message">{success}</div>}
 
+      {/* 💰 Safe Balance Display */}
+      {safeEthBalance && (
+        <div className="balance-info success">
+          <strong>Safe ETH Balance:</strong> {safeEthBalance} ETH
+          <br />
+          <small
+            style={{ color: "#666", marginTop: "0.5rem", display: "block" }}
+          >
+            ℹ️ ETH only used for gas. CCIP fees are paid in LINK token when
+            using Safe multisig
+          </small>
+        </div>
+      )}
+
+      {feeEstimate && (
+        <div
+          className="balance-info success"
+          style={{
+            marginTop: "1rem",
+            background: "#fff3e0",
+            borderLeftColor: "#ff9800",
+          }}
+        >
+          <strong>💰 CCIP Fee:</strong> {feeEstimate.feeInEther} LINK
+          <br />
+          <small
+            style={{ color: "#e65100", marginTop: "0.5rem", display: "block" }}
+          >
+            ⚠️ <strong>IMPORTANT:</strong> Safe must have enough LINK tokens for
+            fee payment!
+            <br />
+            Check your LINK balance before proposing the transaction.
+          </small>
+        </div>
+      )}
+
       <form onSubmit={handleProposeTransfer}>
         {/* Source Network (Read-only) */}
         <div className="form-group">
@@ -879,6 +970,34 @@ export default function CCIPTransfer({
           font-size: 0.875rem;
           margin-bottom: 1.5rem;
           line-height: 1.5;
+        }
+
+        .balance-info {
+          padding: 1rem;
+          border-radius: 8px;
+          margin: 1rem 0;
+          font-size: 0.875rem;
+          line-height: 1.6;
+        }
+
+        .balance-info.success {
+          background-color: #e8f5e9;
+          border-left: 4px solid #4caf50;
+          color: #2e7d32;
+        }
+
+        .balance-info.warning {
+          background-color: #fff3e0;
+          border-left: 4px solid #ff9800;
+          color: #e65100;
+        }
+
+        .balance-info code {
+          background: rgba(0, 0, 0, 0.05);
+          padding: 2px 6px;
+          border-radius: 4px;
+          font-size: 0.8rem;
+          word-break: break-all;
         }
 
         .form-group {

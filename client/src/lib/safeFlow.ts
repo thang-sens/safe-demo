@@ -275,13 +275,47 @@ export const executeTransaction = async (
       );
     }
 
+    // 🔍 CRITICAL: Verify Safe has enough ETH before execution
+    const safeBalance = await provider.getBalance(safeAddress);
+    const requiredValue = BigInt(transaction.value);
+
+    console.log("💰 Pre-execution balance check:");
+    console.log(
+      `  Safe Balance: ${safeBalance.toString()} wei (${ethers.formatEther(
+        safeBalance
+      )} ETH)`
+    );
+    console.log(
+      `  Transaction Value: ${requiredValue.toString()} wei (${ethers.formatEther(
+        requiredValue
+      )} ETH)`
+    );
+
+    if (safeBalance < requiredValue) {
+      const shortfall = requiredValue - safeBalance;
+      throw new Error(
+        `❌ INSUFFICIENT SAFE BALANCE!\n\n` +
+          `Safe needs ${ethers.formatEther(
+            requiredValue
+          )} ETH to execute this transaction,\n` +
+          `but only has ${ethers.formatEther(safeBalance)} ETH.\n\n` +
+          `Shortfall: ${ethers.formatEther(shortfall)} ETH\n\n` +
+          `Please send ${ethers.formatEther(
+            shortfall
+          )} ETH to Safe at:\n${safeAddress}\n\n` +
+          `This ETH is needed as msg.value for the CCIP Router to pay cross-chain fees.`
+      );
+    }
+
+    console.log("✅ Safe has sufficient balance for transaction value");
+
     // Create Safe transaction object with EXACT same parameters as stored in the service
     // CRITICAL: Must match all parameters to get the same transaction hash
     const safeTransaction = await safe.createTransaction({
       transactions: [
         {
           to: transaction.to,
-          value: transaction.value,
+          value: transaction.value, // ← This MUST be forwarded as msg.value when Safe calls target
           data: transaction.data || "0x",
           operation: transaction.operation,
         },
@@ -292,8 +326,11 @@ export const executeTransaction = async (
         safeTxGas: transaction.safeTxGas?.toString() || "0",
         baseGas: transaction.baseGas?.toString() || "0",
         gasPrice: transaction.gasPrice?.toString() || "0",
-        gasToken: transaction.gasToken || "0x0000000000000000000000000000000000000000",
-        refundReceiver: transaction.refundReceiver || "0x0000000000000000000000000000000000000000",
+        gasToken:
+          transaction.gasToken || "0x0000000000000000000000000000000000000000",
+        refundReceiver:
+          transaction.refundReceiver ||
+          "0x0000000000000000000000000000000000000000",
       },
     });
 
@@ -385,7 +422,14 @@ export const executeTransaction = async (
     // Safe's internal safeTxGas (3M) is for internal accounting
     // But blockchain transaction needs actual gas limit (5M for CCIP)
     console.log("⛽ Executing with high gas limit for CCIP compatibility...");
-    
+    console.log("📋 Final transaction details:", {
+      to: safeTransaction.data.to,
+      value: safeTransaction.data.value,
+      data: safeTransaction.data.data.slice(0, 66) + "...",
+      operation: safeTransaction.data.operation,
+      safeTxGas: safeTransaction.data.safeTxGas,
+    });
+
     const executeTxResponse = await safe.executeTransaction(safeTransaction, {
       gasLimit: "5000000", // 5M gas for blockchain transaction
       // This ensures the EVM has enough gas to complete:
@@ -394,7 +438,7 @@ export const executeTransaction = async (
       // 3. All nested calls and state changes (~500k+)
       // 4. Buffer for network variations (~1M+)
     });
-    
+
     const txResponse = executeTxResponse.transactionResponse as unknown as {
       wait: () => Promise<{ hash: string }>;
     } | null;
@@ -404,6 +448,46 @@ export const executeTransaction = async (
       "✅ Transaction executed successfully:",
       receipt?.hash || executeTxResponse.hash
     );
+
+    // 🔍 Verify Safe balance decreased by transaction value
+    const safeBalanceAfter = await provider.getBalance(safeAddress);
+    const balanceChange = safeBalance - safeBalanceAfter;
+
+    console.log("💰 Post-execution balance check:");
+    console.log(
+      `  Safe Balance After: ${safeBalanceAfter.toString()} wei (${ethers.formatEther(
+        safeBalanceAfter
+      )} ETH)`
+    );
+    console.log(
+      `  Balance Change: ${balanceChange.toString()} wei (${ethers.formatEther(
+        balanceChange
+      )} ETH)`
+    );
+    console.log(
+      `  Expected Value Transfer: ${requiredValue.toString()} wei (${ethers.formatEther(
+        requiredValue
+      )} ETH)`
+    );
+
+    // Note: Balance change will be higher than value due to gas costs
+    // But it should be at least equal to the transaction value
+    if (balanceChange < requiredValue) {
+      console.warn(
+        `⚠️ WARNING: Safe balance decreased by ${ethers.formatEther(
+          balanceChange
+        )} ETH, ` +
+          `but transaction value was ${ethers.formatEther(
+            requiredValue
+          )} ETH. ` +
+          `This may indicate the value was not forwarded correctly!`
+      );
+    } else {
+      console.log(
+        `✅ Safe balance correctly decreased by at least transaction value`
+      );
+    }
+
     return receipt?.hash || executeTxResponse.hash || "";
   } catch (error) {
     console.error("Error executing transaction:", error);
@@ -886,10 +970,15 @@ const getViemChain = (networkName: NetworkName) => {
 /**
  * Calculate CCIP transfer fee using CCIP SDK
  * This estimates the cost of sending a cross-chain message
+ *
+ * ⚠️ IMPORTANT FOR SAFE MULTISIG:
+ * When using Safe, you MUST pay fees with LINK token, not native ETH!
+ * Safe cannot forward msg.value correctly, so native fee payment fails.
  */
 export const calculateCCIPFee = async (
   params: CCIPTransferParams,
-  _provider: BrowserProvider // Prefix with _ to indicate intentionally unused
+  _provider: BrowserProvider, // Prefix with _ to indicate intentionally unused
+  useLinkForFees = true // Default to LINK for Safe compatibility
 ): Promise<CCIPFeeEstimate> => {
   try {
     const sourceConfig = getNetworkConfig(params.sourceNetwork);
@@ -902,6 +991,18 @@ export const calculateCCIPFee = async (
       );
     }
 
+    // Get LINK token for fee payment (required for Safe)
+    const linkToken = useLinkForFees
+      ? getTokenBySymbol(params.sourceNetwork, "LINK")
+      : null;
+
+    if (useLinkForFees && !linkToken) {
+      throw new Error(
+        `LINK token not found on ${params.sourceNetwork}. ` +
+          `LINK is required for fee payment when using Safe multisig.`
+      );
+    }
+
     // Get viem chain config
     const sourceChain = getViemChain(params.sourceNetwork);
 
@@ -909,7 +1010,6 @@ export const calculateCCIPFee = async (
     const rpcUrl = sourceConfig.rpcUrl;
 
     // Create a viem public client manually
-
     const publicClient = createPublicClient({
       chain: sourceChain,
       transport: http(rpcUrl),
@@ -919,6 +1019,8 @@ export const calculateCCIPFee = async (
     const ccipClient = createClient();
 
     // Get fee using CCIP SDK
+    // When useLinkForFees=true, fee is returned in LINK token amount
+    // When useLinkForFees=false, fee is returned in native token (ETH)
     const feeInWei = await ccipClient.getFee({
       client: publicClient as any, // Type cast to avoid viem version conflicts
       routerAddress: sourceConfig.routerAddress as `0x${string}`,
@@ -926,7 +1028,16 @@ export const calculateCCIPFee = async (
       destinationAccount: params.recipientAddress as `0x${string}`,
       amount: BigInt(params.amount),
       tokenAddress: token.address as `0x${string}`,
+      feeTokenAddress: useLinkForFees
+        ? (linkToken!.address as `0x${string}`)
+        : undefined, // undefined = native token
     });
+
+    console.log(
+      `💰 CCIP Fee calculated: ${feeInWei.toString()} (${
+        useLinkForFees ? "LINK" : "ETH"
+      })`
+    );
 
     return {
       feeInWei: feeInWei.toString(),
@@ -941,6 +1052,9 @@ export const calculateCCIPFee = async (
 /**
  * Build CCIP transaction data for Safe execution using CCIP SDK
  * This creates the transaction payload that Safe will execute
+ *
+ * ⚠️ CRITICAL FOR SAFE: Uses LINK token for fee payment!
+ * Safe cannot forward msg.value, so we MUST use LINK for fees.
  */
 export const buildCCIPSafeTransaction = async (
   params: CCIPTransferParams,
@@ -961,10 +1075,23 @@ export const buildCCIPSafeTransaction = async (
       );
     }
 
-    // Calculate fee first
-    const estimatedFee = await calculateCCIPFee(params, provider);
+    // 🔥 Get LINK token for fee payment (REQUIRED for Safe!)
+    const linkToken = getTokenBySymbol(params.sourceNetwork, "LINK");
+    if (!linkToken) {
+      throw new Error(
+        `❌ LINK token not found on ${params.sourceNetwork}!\n\n` +
+          `LINK is REQUIRED for CCIP fee payment when using Safe multisig.\n` +
+          `Safe cannot forward ETH value (msg.value) correctly, so you must use LINK for fees.\n\n` +
+          `Please ensure LINK token is configured in ccipConfig.ts for this network.`
+      );
+    }
 
-    // Prepare transactions array (may need approval + CCIP send)
+    console.log(`🔗 Using LINK token for fees: ${linkToken.address}`);
+
+    // Calculate fee in LINK (not ETH!)
+    const estimatedFee = await calculateCCIPFee(params, provider, true); // true = use LINK
+
+    // Prepare transactions array (may need token approval + LINK approval + CCIP send)
     const transactions: MetaTransactionData[] = [];
 
     // Step 1: Check if token approval is needed using DIRECT blockchain call
@@ -974,31 +1101,25 @@ export const buildCCIPSafeTransaction = async (
       IERC20ABI,
       provider
     );
-    
-    const currentAllowance = await tokenContract.allowance(
+
+    const currentAllowance = (await tokenContract.allowance(
       safeAddress,
       sourceConfig.routerAddress
-    ) as bigint;
+    )) as bigint;
 
     const amountBN = BigInt(params.amount);
 
     console.log(
-      `[CCIP Build] ⚡ FRESH allowance check from blockchain: ${currentAllowance.toString()}, needed: ${amountBN.toString()}`
+      `[CCIP Build] ⚡ FRESH token allowance check: ${currentAllowance.toString()}, needed: ${amountBN.toString()}`
     );
     console.log(
       `[CCIP Build] Safe: ${safeAddress}, Router: ${sourceConfig.routerAddress}, Token: ${token.address}`
     );
 
-    // If allowance is insufficient, add approval transaction
+    // If token allowance is insufficient, add approval transaction
     if (currentAllowance < amountBN) {
       console.log(
-        "[CCIP Build] Insufficient allowance - adding approval transaction"
-      );
-      // Use ethers to encode the approval data for Safe transaction
-      const tokenContract = new ethers.Contract(
-        token.address,
-        IERC20ABI,
-        provider
+        "[CCIP Build] Insufficient token allowance - adding token approval transaction"
       );
 
       const approvalData = tokenContract.interface.encodeFunctionData(
@@ -1014,7 +1135,44 @@ export const buildCCIPSafeTransaction = async (
       });
     }
 
-    // Step 2: Build CCIP send transaction using SDK
+    // Step 2: Check if LINK approval is needed for fee payment
+    const linkContract = new ethers.Contract(
+      linkToken.address,
+      IERC20ABI,
+      provider
+    );
+
+    const linkAllowance = (await linkContract.allowance(
+      safeAddress,
+      sourceConfig.routerAddress
+    )) as bigint;
+
+    const linkFeeAmount = BigInt(estimatedFee.feeInWei);
+
+    console.log(
+      `[CCIP Build] 💰 LINK allowance check: ${linkAllowance.toString()}, needed for fee: ${linkFeeAmount.toString()}`
+    );
+
+    // If LINK allowance is insufficient, add LINK approval transaction
+    if (linkAllowance < linkFeeAmount) {
+      console.log(
+        "[CCIP Build] Insufficient LINK allowance - adding LINK approval transaction for fee payment"
+      );
+
+      const linkApprovalData = linkContract.interface.encodeFunctionData(
+        "approve",
+        [sourceConfig.routerAddress, linkFeeAmount]
+      );
+
+      transactions.push({
+        to: linkToken.address,
+        value: "0", // No ETH value for approval
+        data: linkApprovalData,
+        operation: 0, // Call
+      });
+    }
+
+    // Step 3: Build CCIP send transaction using SDK
     // We need to manually encode the ccipSend call since we're not directly calling it
     // but proposing it through Safe
 
@@ -1050,7 +1208,7 @@ export const buildCCIPSafeTransaction = async (
       `[CCIP Build] ExtraArgs V2 (gasLimit=${gasLimit}, allowOutOfOrder=${allowOutOfOrderExecution}): ${extraArgsV2}`
     );
 
-    // Build CCIP message structure following SDK format exactly
+    // 🔥 Build CCIP message with LINK fee token (NOT native ETH!)
     const ccipMessage = {
       receiver: receiverBytes,
       data: "0x0000000000000000000000000000000000000000000000000000000000000000" as `0x${string}`, // zeroHash for no data
@@ -1060,7 +1218,7 @@ export const buildCCIPSafeTransaction = async (
           amount: amountBN,
         },
       ],
-      feeToken: "0x0000000000000000000000000000000000000000" as `0x${string}`, // zeroAddress for native token fees
+      feeToken: linkToken.address as `0x${string}`, // 🔥 USE LINK FOR FEES (not zero address!)
       extraArgs: extraArgsV2, // V2 encoded extra args with correct tag
     };
 
@@ -1074,7 +1232,7 @@ export const buildCCIPSafeTransaction = async (
           token: t.token,
           amount: t.amount.toString(),
         })),
-        feeToken: ccipMessage.feeToken,
+        feeToken: ccipMessage.feeToken, // LINK address
         extraArgs: extraArgsV2,
       },
     });
@@ -1091,19 +1249,22 @@ export const buildCCIPSafeTransaction = async (
       `[CCIP Build] CCIP send call data length: ${fullCallData.length} bytes`
     );
     console.log(
-      `[CCIP Build] Fee (value): ${estimatedFee.feeInWei} wei (${estimatedFee.feeInEther} ETH)`
+      `[CCIP Build] Fee (in LINK): ${estimatedFee.feeInWei} (${estimatedFee.feeInEther} LINK)`
     );
 
-    // Add CCIP send transaction (with fee as value)
+    // 🔥 Add CCIP send transaction with NO ETH value (fee paid in LINK!)
     transactions.push({
       to: sourceConfig.routerAddress,
-      value: estimatedFee.feeInWei,
+      value: "0", // 🔥 NO ETH VALUE! Fee is paid in LINK token
       data: fullCallData,
       operation: 0, // Call
     });
 
     console.log(
       `[CCIP Build] Total transactions to execute: ${transactions.length}`
+    );
+    console.log(
+      `[CCIP Build] ⚠️ NOTE: Fee will be paid in LINK (${estimatedFee.feeInEther} LINK), NOT ETH`
     );
 
     return {
