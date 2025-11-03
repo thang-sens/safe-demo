@@ -126,6 +126,9 @@ export default function CCIPTransfer({
     recipientAddress: "",
   });
 
+  // 💰 Fee token selection: LINK (recommended) or native ETH
+  const [feeToken, setFeeToken] = useState<"LINK" | "native">("LINK");
+
   const sourceNetwork = DEFAULT_SOURCE_NETWORK;
   const destinationNetworks = getAvailableDestinationNetworks(sourceNetwork);
   const supportedTokens = getSupportedTokens(sourceNetwork);
@@ -198,8 +201,8 @@ export default function CCIPTransfer({
         recipientAddress: formData.recipientAddress,
       };
 
-      // Get fee estimate
-      const fee = await calculateCCIPFee(params, provider);
+      // Get fee estimate with selected fee token (LINK or native ETH)
+      const fee = await calculateCCIPFee(params, provider, feeToken);
       setFeeEstimate(fee);
 
       // Check balances
@@ -298,65 +301,87 @@ export default function CCIPTransfer({
         recipientAddress: formData.recipientAddress,
       };
 
-      // 🔍 CRITICAL: Check Safe has sufficient ETH BEFORE proposing
+      // 🔍 CRITICAL: Check Safe has sufficient balance BEFORE proposing
       console.log("💰 Checking Safe balance before proposing CCIP transfer...");
       const safeBalance = await provider.getBalance(safeAddress);
       const requiredFee = BigInt(feeEstimate!.feeInWei);
 
       console.log(`Safe Balance: ${ethers.formatEther(safeBalance)} ETH`);
-      console.log(`Required Fee: ${ethers.formatEther(requiredFee)} ETH`);
+      console.log(
+        `Required Fee: ${ethers.formatEther(requiredFee)} ${
+          feeEstimate!.feeToken
+        }`
+      );
 
-      if (safeBalance < requiredFee) {
-        const shortfall = requiredFee - safeBalance;
-        throw new Error(
-          `❌ Insufficient ETH in Safe!\n\n` +
-            `Safe Balance: ${ethers.formatEther(safeBalance)} ETH\n` +
-            `Required Fee: ${ethers.formatEther(requiredFee)} ETH\n` +
-            `Shortfall: ${ethers.formatEther(shortfall)} ETH\n\n` +
-            `⚠️ Please send at least ${ethers.formatEther(
-              shortfall
-            )} ETH to Safe at:\n${safeAddress}\n\n` +
-            `Tip: Send a bit more (e.g., ${ethers.formatEther(
-              shortfall + BigInt("10000000000000000")
-            )} ETH) to cover gas variations.`
-        );
-      }
+      // Balance check depends on fee token type
+      if (feeToken === "native") {
+        // For native ETH fees, check ETH balance
+        if (safeBalance < requiredFee) {
+          const shortfall = requiredFee - safeBalance;
+          throw new Error(
+            `❌ Insufficient ETH in Safe for native fee payment!\n\n` +
+              `Safe Balance: ${ethers.formatEther(safeBalance)} ETH\n` +
+              `Required Fee: ${ethers.formatEther(requiredFee)} ETH\n` +
+              `Shortfall: ${ethers.formatEther(shortfall)} ETH\n\n` +
+              `⚠️ Please send at least ${ethers.formatEther(
+                shortfall
+              )} ETH to Safe at:\n${safeAddress}\n\n` +
+              `Tip: Send a bit more (e.g., ${ethers.formatEther(
+                shortfall + BigInt("10000000000000000")
+              )} ETH) to cover gas variations.`
+          );
+        }
 
-      // Add buffer check (warn if less than 10% buffer)
-      const bufferAmount = requiredFee / BigInt(10); // 10% buffer
-      if (safeBalance < requiredFee + bufferAmount) {
-        console.warn(
-          `⚠️ Safe balance is close to minimum required. ` +
-            `Consider adding more ETH for gas variations.`
+        // Add buffer check (warn if less than 10% buffer)
+        const bufferAmount = requiredFee / BigInt(10); // 10% buffer
+        if (safeBalance < requiredFee + bufferAmount) {
+          console.warn(
+            `⚠️ Safe balance is close to minimum required. ` +
+              `Consider adding more ETH for gas variations.`
+          );
+        }
+      } else {
+        // For LINK fees, ETH only needed for gas (no specific check here)
+        // Balance check for LINK will be done in proposeCCIPTransfer
+        console.log(
+          `✅ Using LINK for fees, ETH balance: ${ethers.formatEther(
+            safeBalance
+          )} ETH (for gas only)`
         );
       }
 
       console.log("✅ Safe has sufficient balance, proposing transaction...");
 
-      const result = await proposeCCIPTransfer(params, safeAddress, provider);
+      const result = await proposeCCIPTransfer(
+        params,
+        safeAddress,
+        provider,
+        feeToken
+      );
 
       if (result.needsApproval) {
-        // Both transactions were proposed
+        // Batched transaction with approval included
         setSuccess(
-          `✅ TWO Transactions Proposed Successfully!\n\n` +
-            `Transaction 1 (Approval):\n` +
-            `Hash: ${result.approvalTxHash!.substring(0, 20)}...\n` +
-            `Purpose: Approve LINK token to CCIP Router\n\n` +
-            `Transaction 2 (CCIP Transfer):\n` +
-            `Hash: ${result.ccipTxHash!.substring(0, 20)}...\n` +
-            `Purpose: Cross-chain token transfer\n\n` +
-            `⚠️ IMPORTANT - Execute in ORDER:\n\n` +
-            `Step 1: Execute Approval Transaction\n` +
+          `✅ Batched CCIP Transaction Proposed! 🎉\n\n` +
+            `Transaction Hash: ${result.safeTxHash.substring(0, 20)}...\n\n` +
+            `🔥 NEW: All operations batched into ONE transaction!\n` +
+            `This transaction includes:\n` +
+            `  1. Token approval (for transfer amount)\n` +
+            (feeToken === "LINK"
+              ? `  2. LINK approval (for fee payment)\n`
+              : "") +
+            `  ${
+              feeToken === "LINK" ? "3" : "2"
+            }. CCIP cross-chain transfer\n\n` +
+            `✅ Advantages:\n` +
+            `  • Single execution (no nonce conflicts!)\n` +
+            `  • Atomic operations (all succeed or all fail)\n` +
+            `  • Simpler workflow (one click execute)\n\n` +
+            `Next Steps:\n` +
             `1. Go to "Pending Transactions" tab\n` +
-            `2. Find the approval transaction (to: LINK Token)\n` +
+            `2. Find the batched transaction (MultiSend)\n` +
             `3. Confirm with other owners (if needed)\n` +
-            `4. ⭐ EXECUTE the approval transaction FIRST ⭐\n\n` +
-            `Step 2: Execute CCIP Transfer\n` +
-            `5. Still in "Pending Transactions" tab\n` +
-            `6. Find the CCIP transfer transaction (to: CCIP Router)\n` +
-            `7. Confirm with other owners (if needed)\n` +
-            `8. EXECUTE to send tokens cross-chain! 🚀\n\n` +
-            `Why 2 transactions? Safe cannot batch approval + transfer due to technical limitations.\n\n` +
+            `4. Execute ONCE to run all operations! 🚀\n\n` +
             `After execution, track your transfer below.`
         );
 
@@ -369,7 +394,7 @@ export default function CCIPTransfer({
             `Token already approved - ready to transfer!\n\n` +
             `Next Steps:\n` +
             `1. Go to "Pending Transactions" tab\n` +
-            `2. Find the CCIP transfer transaction (to: CCIP Router)\n` +
+            `2. Find the CCIP transfer transaction\n` +
             `3. Confirm with other owners (if needed)\n` +
             `4. Execute to send tokens cross-chain! 🚀\n\n` +
             `After execution, track your transfer below.`
@@ -878,6 +903,83 @@ export default function CCIPTransfer({
           </div>
         )}
 
+        {/* 💰 Fee Token Selection - NEW! */}
+        {formData.recipientAddress && (
+          <div className="form-group">
+            <label>Pay CCIP Fee With *</label>
+            <div style={{ display: "flex", gap: "1rem", marginTop: "0.5rem" }}>
+              <label
+                style={{
+                  display: "flex",
+                  alignItems: "center",
+                  gap: "0.5rem",
+                  cursor: "pointer",
+                }}
+              >
+                <input
+                  type="radio"
+                  name="feeToken"
+                  value="LINK"
+                  checked={feeToken === "LINK"}
+                  onChange={() => {
+                    setFeeToken("LINK");
+                    setFeeEstimate(null); // Clear fee when changing token
+                  }}
+                  disabled={loading}
+                />
+                <span>
+                  <strong>LINK Token</strong> ✅
+                  <br />
+                  <small style={{ color: "#28a745" }}>
+                    Recommended - Most reliable with Safe
+                  </small>
+                </span>
+              </label>
+
+              <label
+                style={{
+                  display: "flex",
+                  alignItems: "center",
+                  gap: "0.5rem",
+                  cursor: "pointer",
+                }}
+              >
+                <input
+                  type="radio"
+                  name="feeToken"
+                  value="native"
+                  checked={feeToken === "native"}
+                  onChange={() => {
+                    setFeeToken("native");
+                    setFeeEstimate(null); // Clear fee when changing token
+                  }}
+                  disabled={loading}
+                />
+                <span>
+                  <strong>Native ETH</strong> ⚡
+                  <br />
+                  <small style={{ color: "#ffc107" }}>
+                    Advanced - Fewer transactions
+                  </small>
+                </span>
+              </label>
+            </div>
+            <small style={{ marginTop: "0.5rem", display: "block" }}>
+              {feeToken === "LINK" ? (
+                <span>
+                  💡 <strong>LINK mode:</strong> Safe will approve LINK tokens
+                  to pay CCIP fees. Requires Safe to have LINK balance.
+                </span>
+              ) : (
+                <span>
+                  ⚡ <strong>Native ETH mode:</strong> Safe will use ETH from
+                  its balance to pay fees. Requires sufficient ETH.
+                </span>
+              )}
+            </small>
+          </div>
+        )}
+
         {/* Calculate Fee Button */}
         {formData.recipientAddress && (
           <button
@@ -895,23 +997,39 @@ export default function CCIPTransfer({
           <div className="fee-estimate">
             <h4>Estimated Fee</h4>
             <p>
-              <strong>Fee:</strong> {feeEstimate.feeInEther} ETH
+              <strong>Fee:</strong> {feeEstimate.feeInEther}{" "}
+              {feeEstimate.feeToken === "LINK" ? "LINK" : "ETH"}
             </p>
             <p className="fee-note">
               This fee is paid on the source network (
               {CCIP_NETWORKS[sourceNetwork].name})
+              {feeEstimate.feeToken === "LINK"
+                ? " using LINK tokens"
+                : " using native ETH"}
             </p>
             {balanceCheck && (
-              <p
-                style={{
-                  color: balanceCheck.hasFeeBalance ? "green" : "red",
-                  fontWeight: "bold",
-                }}
-              >
-                {balanceCheck.hasFeeBalance
-                  ? "✓ Safe has sufficient balance for fees"
-                  : "✗ Insufficient balance for fees"}
-              </p>
+              <div>
+                <p
+                  style={{
+                    color: balanceCheck.hasFeeBalance ? "green" : "red",
+                    fontWeight: "bold",
+                  }}
+                >
+                  {balanceCheck.hasFeeBalance
+                    ? `✓ Safe has sufficient ${
+                        feeEstimate.feeToken === "LINK" ? "LINK" : "ETH"
+                      } balance for fees`
+                    : `✗ Insufficient ${
+                        feeEstimate.feeToken === "LINK" ? "LINK" : "ETH"
+                      } balance for fees`}
+                </p>
+                {feeEstimate.feeToken === "native" && (
+                  <p style={{ fontSize: "0.9em", color: "#666" }}>
+                    Safe ETH Balance:{" "}
+                    {ethers.formatEther(balanceCheck.nativeBalance)} ETH
+                  </p>
+                )}
+              </div>
             )}
 
             {/* Debug Balance Button */}
