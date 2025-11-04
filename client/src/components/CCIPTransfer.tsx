@@ -809,7 +809,11 @@ export default function CCIPTransfer({
           <br />
           {feeToken === "LINK" ? (
             <small
-              style={{ color: "#e65100", marginTop: "0.5rem", display: "block" }}
+              style={{
+                color: "#e65100",
+                marginTop: "0.5rem",
+                display: "block",
+              }}
             >
               ⚠️ <strong>IMPORTANT:</strong> Safe must have enough LINK tokens
               for fee payment!
@@ -818,7 +822,11 @@ export default function CCIPTransfer({
             </small>
           ) : (
             <small
-              style={{ color: "#1565c0", marginTop: "0.5rem", display: "block" }}
+              style={{
+                color: "#1565c0",
+                marginTop: "0.5rem",
+                display: "block",
+              }}
             >
               ℹ️ <strong>NATIVE FEE MODE:</strong> You'll need to execute 2
               transactions in order:
@@ -978,7 +986,7 @@ export default function CCIPTransfer({
                   <strong>LINK Token</strong> ✅
                   <br />
                   <small style={{ color: "#28a745" }}>
-                    Recommended - Most reliable with Safe
+                    Recommended - Works with Safe multisig
                   </small>
                 </span>
               </label>
@@ -988,8 +996,10 @@ export default function CCIPTransfer({
                   display: "flex",
                   alignItems: "center",
                   gap: "0.5rem",
-                  cursor: "pointer",
+                  cursor: "not-allowed",
+                  opacity: 0.5,
                 }}
+                title="Native ETH fees are not supported for Safe multisig due to value forwarding limitations"
               >
                 <input
                   type="radio"
@@ -1000,27 +1010,60 @@ export default function CCIPTransfer({
                     setFeeToken("native");
                     setFeeEstimate(null); // Clear fee when changing token
                   }}
-                  disabled={loading}
+                  disabled={true} // Always disabled for Safe
                 />
                 <span>
-                  <strong>Native ETH</strong> ⚡
+                  <strong>Native ETH</strong> ❌
                   <br />
-                  <small style={{ color: "#ffc107" }}>
-                    Advanced - Fewer transactions
+                  <small style={{ color: "#dc3545" }}>
+                    Not supported for Safe multisig
                   </small>
                 </span>
               </label>
             </div>
+
+            {/* 🚨 WARNING for Native Fee Limitation */}
+            <div
+              className="balance-info warning"
+              style={{
+                marginTop: "1rem",
+                background: "#fff3cd",
+                border: "1px solid #ffc107",
+                borderLeft: "4px solid #ff9800",
+                padding: "1rem",
+                borderRadius: "4px",
+              }}
+            >
+              <strong>⚠️ IMPORTANT: Native ETH Fees Not Supported</strong>
+              <p style={{ margin: "0.5rem 0 0 0", fontSize: "0.9rem" }}>
+                Native ETH fees <strong>do not work</strong> with Safe multisig
+                wallets due to how Safe forwards value vs. how CCIP Router
+                validates msg.value.
+              </p>
+              <p style={{ margin: "0.5rem 0 0 0", fontSize: "0.9rem" }}>
+                <strong>✅ Solution:</strong> Use <strong>LINK tokens</strong>{" "}
+                for fees (selected above). LINK fees work perfectly with Safe
+                and support transaction batching.
+              </p>
+              <p
+                style={{
+                  margin: "0.5rem 0 0 0",
+                  fontSize: "0.85rem",
+                  color: "#666",
+                }}
+              >
+                💡 <strong>Want native ETH fees?</strong> Use the "Direct CCIP
+                Transfer" tab to transfer directly from your EOA wallet (not
+                multisig).
+              </p>
+            </div>
+
             <small style={{ marginTop: "0.5rem", display: "block" }}>
-              {feeToken === "LINK" ? (
+              {feeToken === "LINK" && (
                 <span>
                   💡 <strong>LINK mode:</strong> Safe will approve LINK tokens
-                  to pay CCIP fees. Requires Safe to have LINK balance.
-                </span>
-              ) : (
-                <span>
-                  ⚡ <strong>Native ETH mode:</strong> Safe will use ETH from
-                  its balance to pay fees. Requires sufficient ETH.
+                  to pay CCIP fees. Requires Safe to have LINK balance. Supports
+                  transaction batching for efficiency!
                 </span>
               )}
             </small>

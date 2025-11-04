@@ -309,6 +309,43 @@ export const executeTransaction = async (
 
     console.log("✅ Safe has sufficient balance for transaction value");
 
+    // 🚨 SAFETY CHECK: Detect if this is a MultiSend transaction with value > 0
+    // MultiSend uses DELEGATECALL which cannot forward msg.value to sub-calls
+    // This would cause CCIP Router to receive 0 value instead of required fee
+
+    // Check: Look at transaction data to detect MultiSend signature
+    const multiSendSignature = "0x8d80ff0a"; // multiSend(bytes)
+    const isLikelyMultiSend =
+      transaction.data && transaction.data.startsWith(multiSendSignature);
+
+    if (isLikelyMultiSend && BigInt(transaction.value) > 0n) {
+      console.error(
+        `[Execute] ❌ CRITICAL: Detected MultiSend transaction with value > 0!`
+      );
+      console.error(
+        `[Execute] This will FAIL due to DELEGATECALL not forwarding msg.value`
+      );
+      console.error(`[Execute] Transaction details:`, {
+        to: transaction.to,
+        value: transaction.value,
+        dataPrefix: transaction.data?.substring(0, 10),
+      });
+
+      throw new Error(
+        `❌ CANNOT EXECUTE: MultiSend with ETH value!\n\n` +
+          `This transaction uses Safe's MultiSend contract, which uses DELEGATECALL.\n` +
+          `DELEGATECALL does NOT forward msg.value to sub-calls, so the CCIP Router\n` +
+          `would receive 0 ETH instead of the required ${ethers.formatEther(
+            transaction.value
+          )} ETH fee.\n\n` +
+          `📋 TO FIX:\n` +
+          `1. This transaction should have been proposed separately (not batched)\n` +
+          `2. Go back and re-propose using native fee mode correctly\n` +
+          `3. Or switch to LINK fees (batching works with LINK)\n\n` +
+          `⚠️ Executing this transaction WILL FAIL and waste gas!`
+      );
+    }
+
     // Create Safe transaction object with EXACT same parameters as stored in the service
     // CRITICAL: Must match all parameters to get the same transaction hash
     const safeTransaction = await safe.createTransaction({
@@ -428,6 +465,25 @@ export const executeTransaction = async (
       data: safeTransaction.data.data.slice(0, 66) + "...",
       operation: safeTransaction.data.operation,
       safeTxGas: safeTransaction.data.safeTxGas,
+    });
+
+    // 🔥 CRITICAL FIX: For transactions with value > 0, we need to ensure
+    // Safe forwards the value from its own balance to the target contract.
+    //
+    // Safe's execTransaction() should automatically forward value when:
+    // - operation = 0 (Call)
+    // - value > 0 in transaction data
+    //
+    // But there may be a bug in Protocol Kit not handling this correctly.
+    // Let's add explicit logging to debug this.
+
+    console.log("🔍 Pre-execution value check:", {
+      hasValue: BigInt(safeTransaction.data.value) > 0n,
+      valueAmount: safeTransaction.data.value,
+      operation: safeTransaction.data.operation === 0 ? "Call" : "DelegateCall",
+      willForwardValue:
+        safeTransaction.data.operation === 0 &&
+        BigInt(safeTransaction.data.value) > 0n,
     });
 
     const executeTxResponse = await safe.executeTransaction(safeTransaction, {
@@ -1297,9 +1353,30 @@ export const buildCCIPSafeTransaction = async (
     // 🎯 Add CCIP send transaction with appropriate value
     // - LINK fees: value = "0" (fee paid via ERC20 transfer)
     // - Native fees: value = feeInWei (fee paid via msg.value)
+    const ccipTxValue = feeToken === "native" ? estimatedFee.feeInWei : "0";
+
+    console.log(`[CCIP Build] 🔍 Transaction value calculation:`, {
+      feeToken,
+      estimatedFeeInWei: estimatedFee.feeInWei,
+      ccipTxValue,
+      willHaveValue: BigInt(ccipTxValue) > 0n,
+    });
+
+    // 🚨 CRITICAL VALIDATION: Ensure native fee has actual value
+    if (feeToken === "native" && BigInt(ccipTxValue) === 0n) {
+      console.error(
+        `[CCIP Build] ❌ CRITICAL: Native fee selected but transaction value is 0!`
+      );
+      throw new Error(
+        `Internal error: Native fee mode has 0 transaction value. ` +
+          `Fee amount: ${estimatedFee.feeInWei} wei. ` +
+          `This would cause CCIP transfer to fail.`
+      );
+    }
+
     transactions.push({
       to: sourceConfig.routerAddress,
-      value: feeToken === "native" ? estimatedFee.feeInWei : "0",
+      value: ccipTxValue,
       data: fullCallData,
       operation: 0, // Call
     });
@@ -1315,6 +1392,14 @@ export const buildCCIPSafeTransaction = async (
         feeToken === "native" ? estimatedFee.feeInEther + " ETH" : "0 ETH"
       }`
     );
+
+    // 🚨 FINAL VALIDATION: Check transaction array integrity
+    console.log(`[CCIP Build] 🔍 Final transaction validation:`, {
+      totalTransactions: transactions.length,
+      transactionsWithValue: transactions.filter((tx) => BigInt(tx.value) > 0n)
+        .length,
+      feeTokenUsed: feeToken,
+    });
 
     return {
       transactions,
@@ -1343,18 +1428,55 @@ export const proposeCCIPTransfer = async (
   ccipTxHash?: string;
 }> => {
   try {
+    // 🚨 CRITICAL: Force LINK fees for Safe multisig
+    // Native ETH fees DO NOT work with Safe due to value forwarding limitations
+    // See NATIVE_FEE_SAFE_LIMITATION.md for detailed explanation
+    let actualFeeToken: "LINK" | "native" = feeToken;
+
+    if (feeToken === "native") {
+      console.error(
+        "[CCIP] ❌ CRITICAL: Native ETH fees are NOT supported for Safe multisig!"
+      );
+      console.error(
+        "[CCIP] Reason: Safe's value forwarding doesn't work with CCIP Router's msg.value validation"
+      );
+      console.error("[CCIP] 🔄 FORCING LINK fees for compatibility...");
+
+      // Force switch to LINK
+      actualFeeToken = "LINK";
+
+      alert(
+        "⚠️ IMPORTANT NOTICE\n\n" +
+          "Native ETH fees are NOT supported for Safe multisig wallets.\n\n" +
+          "This is due to how Safe forwards value vs. how CCIP Router validates fees.\n\n" +
+          "Automatically switching to LINK fees for you.\n\n" +
+          "✅ LINK fees work perfectly with Safe and support transaction batching!"
+      );
+    }
+
     // Build CCIP transaction(s)
     const { transactions, estimatedFee } = await buildCCIPSafeTransaction(
       params,
       safeAddress,
       provider,
-      feeToken // Pass fee token choice
+      actualFeeToken // Use actual fee token (forced to LINK if was native)
     );
 
     console.log(
       `[CCIP] Built ${transactions.length} transaction(s):`,
       transactions
     );
+
+    // 🔍 DEBUG: Log each transaction value for native fee detection
+    transactions.forEach((tx, i) => {
+      console.log(`[CCIP] Transaction ${i + 1}:`, {
+        to: tx.to,
+        value: tx.value,
+        valueType: typeof tx.value,
+        valueBigInt: BigInt(tx.value).toString(),
+        hasValue: BigInt(tx.value) > 0n,
+      });
+    });
 
     // � CRITICAL DECISION: Batch vs Separate based on fee token type!
     //
@@ -1372,8 +1494,34 @@ export const proposeCCIPTransfer = async (
     // See: https://docs.safe.global/advanced/smart-account-transactions
     //      "Transactions with value must be executed individually"
 
-    const hasValueTransaction = transactions.some((tx) => BigInt(tx.value) > 0n);
+    const hasValueTransaction = transactions.some(
+      (tx) => BigInt(tx.value) > 0n
+    );
     const useNativeFee = feeToken === "native" && hasValueTransaction;
+
+    console.log(`[CCIP] 🔍 Native fee detection:`, {
+      feeToken,
+      transactionCount: transactions.length,
+      hasValueTransaction,
+      useNativeFee,
+      willProposeSeparately: useNativeFee,
+    });
+
+    // 🚨 CRITICAL CHECK: If using native fees, MUST propose separately!
+    if (feeToken === "native" && !useNativeFee && transactions.length > 0) {
+      console.error(
+        `[CCIP] ❌ CRITICAL ERROR: Native fee selected but useNativeFee=false!`
+      );
+      console.error(
+        `[CCIP] This will cause MultiSend DELEGATECALL to drop msg.value!`
+      );
+      console.error(`[CCIP] Transaction details:`, transactions);
+      throw new Error(
+        `Internal error: Native fee mode misconfigured. ` +
+          `This would cause transaction failure due to MultiSend DELEGATECALL limitations. ` +
+          `Please report this bug.`
+      );
+    }
 
     if (useNativeFee) {
       console.log(
