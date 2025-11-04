@@ -11,6 +11,7 @@ import {
   encodeAbiParameters,
   encodeFunctionData,
 } from "viem";
+import { sepolia } from "viem/chains";
 import { getRawProvider } from "./web3auth";
 
 // Transaction data interface
@@ -1149,6 +1150,47 @@ export const buildCCIPSafeTransaction = async (
         `Token ${params.tokenSymbol} not found on ${params.sourceNetwork}`
       );
     }
+
+    // ✅ CRITICAL: Check if token is supported for CCIP transfer to destination
+    console.log(
+      `[CCIP Build] 🔍 Checking if ${params.tokenSymbol} is supported for transfer from ${params.sourceNetwork} to ${params.destinationNetwork}...`
+    );
+
+    const ccipClient = createClient();
+
+    // Create viem PublicClient for proper RPC interaction
+    const rpcUrl = import.meta.env.VITE_INFURA_RPC_URL;
+    if (!rpcUrl) {
+      throw new Error("RPC URL not configured in environment variables");
+    }
+
+    const viemClient = createPublicClient({
+      chain: sepolia,
+      transport: http(rpcUrl),
+    });
+
+    const isSupported = await ccipClient.isTokenSupported({
+      client: viemClient as any, // Cast to handle viem type compatibility
+      routerAddress: sourceConfig.routerAddress as `0x${string}`,
+      destinationChainSelector: destConfig.chainSelector,
+      tokenAddress: token.address as `0x${string}`,
+    });
+
+    if (!isSupported) {
+      throw new Error(
+        `❌ Token ${params.tokenSymbol} is NOT supported for CCIP transfer!\n\n` +
+          `Transfer from: ${params.sourceNetwork}\n` +
+          `Transfer to: ${params.destinationNetwork}\n` +
+          `Token address: ${token.address}\n` +
+          `Router: ${sourceConfig.routerAddress}\n\n` +
+          `This token cannot be transferred via CCIP to the destination chain.\n` +
+          `Please select a different token or destination network.`
+      );
+    }
+
+    console.log(
+      `[CCIP Build] ✅ Token ${params.tokenSymbol} is supported for CCIP transfer`
+    );
 
     // 🎯 Get LINK token (only needed if using LINK for fees)
     const linkToken =

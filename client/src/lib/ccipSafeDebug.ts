@@ -3,9 +3,91 @@
  * Helps diagnose why Safe CCIP transfers fail
  */
 import { BrowserProvider, ethers } from "ethers";
-import { IERC20ABI } from "@chainlink/ccip-js";
+import { IERC20ABI, createClient } from "@chainlink/ccip-js";
+import { createPublicClient, http } from "viem";
+import { sepolia } from "viem/chains";
 import { getNetworkConfig, getTokenBySymbol } from "./ccipConfig";
 import type { NetworkName } from "./ccipConfig";
+
+/**
+ * Check if a token is supported for CCIP transfer to destination chain
+ * Uses CCIP SDK's isTokenSupported function
+ * Note: This function creates its own viem PublicClient for RPC calls
+ */
+export const checkTokenSupported = async (
+  tokenSymbol: string,
+  sourceNetwork: NetworkName,
+  destinationNetwork: NetworkName
+): Promise<{
+  isSupported: boolean;
+  tokenAddress: string;
+  routerAddress: string;
+  destinationChainSelector: string;
+  errorMessage?: string;
+}> => {
+  try {
+    const sourceConfig = getNetworkConfig(sourceNetwork);
+    const destConfig = getNetworkConfig(destinationNetwork);
+    const token = getTokenBySymbol(sourceNetwork, tokenSymbol);
+
+    if (!token) {
+      return {
+        isSupported: false,
+        tokenAddress: "",
+        routerAddress: sourceConfig.routerAddress,
+        destinationChainSelector: destConfig.chainSelector,
+        errorMessage: `Token ${tokenSymbol} not found on ${sourceNetwork}`,
+      };
+    }
+
+    // Create CCIP client
+    const ccipClient = createClient();
+
+    // CRITICAL: Create a proper viem PublicClient instead of using BrowserProvider
+    // BrowserProvider doesn't have viem's internal methods like _getTransactionRequest
+    const rpcUrl = import.meta.env.VITE_INFURA_RPC_URL;
+
+    if (!rpcUrl) {
+      throw new Error("RPC URL not configured in environment variables");
+    }
+
+    // Create viem PublicClient with proper chain config
+    const viemClient = createPublicClient({
+      chain: sepolia, // Use sepolia for testnet
+      transport: http(rpcUrl),
+    });
+
+    // Check if token is supported for the destination chain
+    const isSupported = await ccipClient.isTokenSupported({
+      client: viemClient as any, // Cast to any to handle viem type compatibility
+      routerAddress: sourceConfig.routerAddress as `0x${string}`,
+      destinationChainSelector: destConfig.chainSelector,
+      tokenAddress: token.address as `0x${string}`,
+    });
+
+    return {
+      isSupported,
+      tokenAddress: token.address,
+      routerAddress: sourceConfig.routerAddress,
+      destinationChainSelector: destConfig.chainSelector,
+      errorMessage: isSupported
+        ? undefined
+        : `Token ${tokenSymbol} (${token.address}) is not supported for transfer from ${sourceNetwork} to ${destinationNetwork}`,
+    };
+  } catch (error) {
+    console.error("Error checking token support:", error);
+    const errorMessage =
+      error instanceof Error ? error.message : "Unknown error";
+
+    return {
+      isSupported: false,
+      tokenAddress: "",
+      routerAddress: "",
+      destinationChainSelector: "",
+      errorMessage: `Failed to check token support: ${errorMessage}`,
+    };
+  }
+};
 
 /**
  * Check if approval transaction was executed before CCIP send
@@ -231,7 +313,10 @@ export const checkSafeCCIPReadiness = async (
 
     if (!hasTokenBalance) {
       issues.push(
-        `Insufficient ${tokenSymbol} balance. Have: ${ethers.formatUnits(tokenBalance, token.decimals)}, Need: ${amount}`
+        `Insufficient ${tokenSymbol} balance. Have: ${ethers.formatUnits(
+          tokenBalance,
+          token.decimals
+        )}, Need: ${amount}`
       );
       recommendations.push(
         `Send at least ${amount} ${tokenSymbol} to Safe: ${safeAddress}`
@@ -245,7 +330,9 @@ export const checkSafeCCIPReadiness = async (
 
     if (!hasNativeBalance) {
       issues.push(
-        `Insufficient ETH for CCIP fees. Have: ${ethers.formatEther(nativeBalance)} ETH, Need: ~0.001 ETH minimum`
+        `Insufficient ETH for CCIP fees. Have: ${ethers.formatEther(
+          nativeBalance
+        )} ETH, Need: ~0.001 ETH minimum`
       );
       recommendations.push(`Send at least 0.01 ETH to Safe: ${safeAddress}`);
     }
@@ -259,7 +346,10 @@ export const checkSafeCCIPReadiness = async (
 
     if (!isTokenApproved) {
       issues.push(
-        `Token not approved to CCIP Router. Current allowance: ${ethers.formatUnits(allowance, token.decimals)} ${tokenSymbol}`
+        `Token not approved to CCIP Router. Current allowance: ${ethers.formatUnits(
+          allowance,
+          token.decimals
+        )} ${tokenSymbol}`
       );
       recommendations.push(
         `⭐ EXECUTE the approval transaction first! Check 'Pending Transactions' tab.`

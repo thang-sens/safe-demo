@@ -23,6 +23,7 @@ import {
   checkApprovalStatus,
   analyzeSafeTransactionFailure,
   checkSafeCCIPReadiness,
+  checkTokenSupported,
 } from "../lib/ccipSafeDebug";
 
 interface CCIPTransferProps {
@@ -118,6 +119,15 @@ export default function CCIPTransfer({
     recommendation: string;
   } | null>(null);
 
+  // Token support check state
+  const [tokenSupportCheck, setTokenSupportCheck] = useState<{
+    isSupported: boolean;
+    tokenAddress: string;
+    routerAddress: string;
+    destinationChainSelector: string;
+    errorMessage?: string;
+  } | null>(null);
+
   // Form state
   const [formData, setFormData] = useState({
     destinationNetwork: "" as NetworkName | "",
@@ -160,16 +170,39 @@ export default function CCIPTransfer({
     });
     setFeeEstimate(null);
     setBalanceCheck(null);
+    setTokenSupportCheck(null); // Clear token support check
   };
 
   // Handle token change
-  const handleTokenChange = (symbol: string) => {
+  const handleTokenChange = async (symbol: string) => {
     setFormData({
       ...formData,
       tokenSymbol: symbol,
     });
     setFeeEstimate(null);
     setBalanceCheck(null);
+    setTokenSupportCheck(null); // Clear previous check
+
+    // Auto-check token support if both token and destination are selected
+    if (symbol && formData.destinationNetwork) {
+      try {
+        const result = await checkTokenSupported(
+          symbol,
+          sourceNetwork,
+          formData.destinationNetwork as NetworkName
+        );
+        setTokenSupportCheck(result);
+
+        if (!result.isSupported) {
+          setError(
+            result.errorMessage ||
+              `Token ${symbol} is not supported for transfer to ${formData.destinationNetwork}`
+          );
+        }
+      } catch (err) {
+        console.error("Error checking token support:", err);
+      }
+    }
   };
 
   // Calculate fee
@@ -236,6 +269,15 @@ export default function CCIPTransfer({
       return false;
     }
 
+    // Check if token is supported for CCIP transfer
+    if (tokenSupportCheck && !tokenSupportCheck.isSupported) {
+      setError(
+        tokenSupportCheck.errorMessage ||
+          `Token ${formData.tokenSymbol} is not supported for CCIP transfer to ${formData.destinationNetwork}`
+      );
+      return false;
+    }
+
     if (!formData.amount || parseFloat(formData.amount) <= 0) {
       setError("Please enter a valid amount");
       return false;
@@ -261,6 +303,8 @@ export default function CCIPTransfer({
   const isFormValid = (checkFee: boolean): boolean => {
     if (!formData.destinationNetwork) return false;
     if (!formData.tokenSymbol) return false;
+    // Check token support
+    if (tokenSupportCheck && !tokenSupportCheck.isSupported) return false;
     if (!formData.amount || parseFloat(formData.amount) <= 0) return false;
     if (
       !formData.recipientAddress ||
@@ -897,6 +941,37 @@ export default function CCIPTransfer({
                 </option>
               ))}
             </select>
+
+            {/* Token Support Status */}
+            {tokenSupportCheck && (
+              <div
+                style={{
+                  marginTop: "8px",
+                  padding: "8px 12px",
+                  borderRadius: "6px",
+                  fontSize: "0.875rem",
+                  backgroundColor: tokenSupportCheck.isSupported
+                    ? "#d4edda"
+                    : "#f8d7da",
+                  color: tokenSupportCheck.isSupported ? "#155724" : "#721c24",
+                  border: `1px solid ${
+                    tokenSupportCheck.isSupported ? "#c3e6cb" : "#f5c6cb"
+                  }`,
+                }}
+              >
+                {tokenSupportCheck.isSupported ? (
+                  <>
+                    ✅ <strong>Token Supported</strong> - This token can be
+                    transferred via CCIP to {formData.destinationNetwork}
+                  </>
+                ) : (
+                  <>
+                    ❌ <strong>Token NOT Supported</strong> -{" "}
+                    {tokenSupportCheck.errorMessage}
+                  </>
+                )}
+              </div>
+            )}
           </div>
         )}
 
