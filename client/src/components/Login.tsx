@@ -1,5 +1,5 @@
-import { useState, useEffect } from "react";
-import { initWeb3Auth, login, getAddress } from "../lib/web3auth";
+import { useState } from "react";
+import { login, getAddress } from "../lib/web3auth";
 
 interface LoginProps {
   onLogin: () => void;
@@ -7,19 +7,19 @@ interface LoginProps {
 
 const Login: React.FC<LoginProps> = ({ onLogin }) => {
   const [address, setAddress] = useState<string | null>(null);
-
-  useEffect(() => {
-    initWeb3Auth();
-  }, []);
+  const [isLoggingIn, setIsLoggingIn] = useState(false);
 
   const handleLogin = async () => {
     try {
+      setIsLoggingIn(true);
       await login();
       const addr = await getAddress();
       setAddress(addr);
       onLogin();
     } catch (error) {
       console.error("Login failed", error);
+    } finally {
+      setIsLoggingIn(false);
     }
   };
 
@@ -27,7 +27,9 @@ const Login: React.FC<LoginProps> = ({ onLogin }) => {
     <div>
       <h2>Login</h2>
       {!address ? (
-        <button onClick={handleLogin}>Login with Web3Auth</button>
+        <button onClick={handleLogin} disabled={isLoggingIn}>
+          {isLoggingIn ? "Logging in..." : "Login with Web3Auth"}
+        </button>
       ) : (
         <p>Logged in as: {address}</p>
       )}

@@ -42,6 +42,30 @@ export const initWeb3Auth = async () => {
   console.log("Web3Auth initialized successfully");
 };
 
+/**
+ * Check if user is already logged in (session persistence)
+ * Returns true if session exists, false otherwise
+ */
+export const isLoggedIn = (): boolean => {
+  return web3auth.connected;
+};
+
+/**
+ * Try to restore existing session without showing login modal
+ * Returns provider if session exists, null otherwise
+ */
+export const restoreSession = async () => {
+  console.log("Checking for existing Web3Auth session...");
+
+  if (web3auth.connected && web3auth.provider) {
+    console.log("✅ Session found! User is already logged in");
+    return web3auth.provider;
+  }
+
+  console.log("ℹ️ No existing session found");
+  return null;
+};
+
 export const login = async () => {
   console.log("Logging in with Web3Auth...");
 
@@ -93,7 +117,8 @@ export const login = async () => {
 export const getSigner = async () => {
   console.log("Getting signer from Web3Auth...");
 
-  const web3authProvider = await login();
+  // Try to use existing provider first, then login if needed
+  const web3authProvider = web3auth.provider || (await login());
   const ethersProvider = new BrowserProvider(web3authProvider);
   const signer = await ethersProvider.getSigner();
   return signer;
@@ -102,6 +127,7 @@ export const getSigner = async () => {
 export const getProvider = async (): Promise<BrowserProvider> => {
   console.log("Getting provider from Web3Auth...");
 
+  // Try to use existing provider first, then login if needed
   const web3authProvider = web3auth.provider || (await login());
   const ethersProvider = new BrowserProvider(web3authProvider);
   return ethersProvider;
@@ -109,6 +135,7 @@ export const getProvider = async (): Promise<BrowserProvider> => {
 
 export const getRawProvider = async () => {
   console.log("Getting raw Web3Auth provider...");
+  // Try to use existing provider first, then login if needed
   const web3authProvider = web3auth.provider || (await login());
   return web3authProvider;
 };
